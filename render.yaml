@@ -1,0 +1,18 @@
+# Render blueprint — optional. You can also create a Web Service manually in the dashboard.
+# Set secrets (JWT_SECRET, DATABASE_URL, etc.) in Render → Environment, not here.
+
+services:
+  - type: web
+    name: vibe-api
+    runtime: node
+    rootDir: .
+    buildCommand: npm install
+    startCommand: npm start
+    healthCheckPath: /api/health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: TRUST_PROXY
+        value: "1"
+      - key: PUBLIC_GYM_SIGNUP_ENABLED
+        value: "1"
