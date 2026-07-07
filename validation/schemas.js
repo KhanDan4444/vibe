@@ -156,6 +156,8 @@ const updateMemberSchema = z.object({
   phone: optionalEthiopianPhone,
   plan_id: optionalPositiveInt,
   start_date: optionalDate,
+  branch_id: optionalPositiveInt,
+  photo: z.union([z.string().max(3_000_000), z.null()]).optional(),
 });
 
 const createPaymentSchema = z

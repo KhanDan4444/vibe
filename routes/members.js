@@ -827,8 +827,9 @@ router.post(
  */
 router.put('/:id', requireActiveSubscription, validateParams(idParamSchema), validateBody(updateMemberSchema), async (req, res, next) => {
   const { id } = req.params;
-  const { name, phone, plan_id, start_date } = req.body;
+  const { name, phone, plan_id, start_date, branch_id, photo } = req.body;
   const gym_id = req.user.gym_id;
+  const { isGymOwner } = require('../utils/roles');
 
   if (plan_id !== undefined || start_date !== undefined) {
     return res.status(400).json({
@@ -853,29 +854,83 @@ router.put('/:id', requireActiveSubscription, validateParams(idParamSchema), val
 
     const currentMember = memberCheck.rows[0];
 
+    let newBranchId = currentMember.branch_id;
+    if (branch_id !== undefined) {
+      const parsedBranch = parseInt(branch_id, 10);
+      if (!Number.isNaN(parsedBranch) && parsedBranch > 0 && parsedBranch !== currentMember.branch_id) {
+        if (!isGymOwner(req.user.role)) {
+          return res.status(403).json({ error: 'Only the gym owner can change a member\'s branch.' });
+        }
+        await assertBranchInGym(parsedBranch, gym_id);
+        newBranchId = parsedBranch;
+      }
+    }
+
+    let newPhotoUrl = currentMember.photo_url;
+    if (photo !== undefined) {
+      if (photo === null || photo === '') {
+        if (currentMember.photo_url) {
+          await removeMemberPhotoFiles(gym_id, id);
+        }
+        newPhotoUrl = null;
+      } else {
+        const photoCheck = parsePhotoDataUrl(photo);
+        if (!photoCheck.ok) {
+          return res.status(400).json({ error: photoCheck.error });
+        }
+        const saved = await saveMemberPhoto(gym_id, id, photo);
+        if (!saved.ok) {
+          return res.status(400).json({ error: saved.error });
+        }
+        newPhotoUrl = saved.photoUrl;
+      }
+    }
+
     const updateQuery = `
       UPDATE Members 
-      SET name = $1, phone = $2
-      WHERE id = $3 AND gym_id = $4
+      SET name = $1, phone = $2, branch_id = $3, photo_url = $4
+      WHERE id = $5 AND gym_id = $6
       RETURNING *;
     `;
     const result = await db.query(updateQuery, [
       name || currentMember.name,
       phone !== undefined ? phone : currentMember.phone,
+      newBranchId,
+      newPhotoUrl,
       id,
       gym_id,
     ]);
 
     const updated = result.rows[0];
+    const enriched = await db.query(
+      `
+      SELECT m.*, p.name AS plan_name, b.name AS branch_name, ${MEMBER_IS_UNPAID_SELECT}
+      FROM Members m
+      LEFT JOIN Plans p ON p.id = m.plan_id
+      LEFT JOIN Branches b ON b.id = m.branch_id
+      WHERE m.id = $1 AND m.gym_id = $2
+      `,
+      [id, gym_id]
+    );
+
+    const auditDetails = { name: updated.name, phone: updated.phone };
+    if (newBranchId !== currentMember.branch_id) {
+      auditDetails.branch_id = newBranchId;
+      auditDetails.from_branch_id = currentMember.branch_id;
+    }
+    if (photo !== undefined && newPhotoUrl !== currentMember.photo_url) {
+      auditDetails.photo_updated = true;
+    }
+
     await recordAuditLog({
       req,
       action: ACTIONS.MEMBER_UPDATED,
       entityType: 'member',
       entityId: updated.id,
       entityLabel: updated.name,
-      details: { name: updated.name, phone: updated.phone },
+      details: auditDetails,
     });
-    res.json(updated);
+    res.json(enriched.rows[0] || updated);
   } catch (error) {
     next(error);
   }

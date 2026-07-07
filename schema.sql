@@ -225,3 +225,13 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_sms_log_daily_dedupe
     WHERE entity_id IS NOT NULL;
 
 CREATE INDEX IF NOT EXISTS idx_sms_log_sent_at ON SmsLog (sent_at);
+
+-- Default SaaS plan catalog (production + fresh installs; skipped once plans exist)
+INSERT INTO SaaSPlans (name, duration, price, description, is_active)
+SELECT v.name, v.duration, v.price, v.description, v.is_active
+FROM (VALUES
+    ('Monthly Starter', 1, 99.00, 'Monthly platform license for a single gym.', true),
+    ('Quarterly Pro', 3, 249.00, 'Quarterly billing with standard support.', true),
+    ('Yearly Standard', 12, 899.00, 'Annual license — best value.', true)
+) AS v(name, duration, price, description, is_active)
+WHERE NOT EXISTS (SELECT 1 FROM SaaSPlans LIMIT 1);
