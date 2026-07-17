@@ -5,31 +5,26 @@
  */
 
 const { formatLocalDate, parseLocalDate, todayLocalString } = require('./localDate');
+const {
+  validatePaymentDate: validatePaymentDateShared,
+  normalizeIso,
+} = require('../shared/paymentDateRules');
 
 /** Normalize DB date/timestamp to YYYY-MM-DD in local calendar. */
 function calendarDateString(dateStr) {
   if (!dateStr) return '';
+  const fromShared = normalizeIso(dateStr);
+  if (fromShared) return fromShared;
   return formatLocalDate(parseLocalDate(dateStr));
 }
 
-/** Validate payment date against term start and today. */
+/** Validate payment date against term start and today (canonical shared rules). */
 function validatePaymentDate(paymentDateStr, termStartDateStr) {
-  const paymentDate = calendarDateString(paymentDateStr);
-  const termStart = calendarDateString(termStartDateStr);
-  const today = todayLocalString();
-  if (!paymentDate) {
-    return { ok: false, error: 'Invalid payment date.' };
-  }
-  if (paymentDate > today) {
-    return { ok: false, error: 'Payment date cannot be in the future.' };
-  }
-  if (termStart && paymentDate < termStart) {
-    return {
-      ok: false,
-      error: `Payment date must be on or after the term start (${termStart}) or it will not count toward this term.`,
-    };
-  }
-  return { ok: true };
+  return validatePaymentDateShared(
+    calendarDateString(paymentDateStr) || paymentDateStr,
+    calendarDateString(termStartDateStr) || termStartDateStr,
+    todayLocalString()
+  );
 }
 
 /**

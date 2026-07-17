@@ -50,7 +50,20 @@ app.use('/api', apiLimiter);
 
 async function initializeDatabase() {
   try {
-    console.log('Checking database connection & creating tables...');
+    const isProduction = process.env.NODE_ENV === 'production';
+    const runBootstrap =
+      process.env.RUN_SCHEMA_BOOTSTRAP === '1' || (!isProduction && process.env.RUN_SCHEMA_BOOTSTRAP !== '0');
+
+    if (!runBootstrap) {
+      console.log(
+        'Skipping schema.sql bootstrap (production). Apply schema with: npm run db:migrate'
+      );
+      await db.checkConnection();
+      console.log('Database connection OK.');
+      return;
+    }
+
+    console.log('Checking database connection & creating tables (schema bootstrap)...');
     const schemaPath = path.join(__dirname, 'schema.sql');
 
     if (!fs.existsSync(schemaPath)) {
@@ -62,7 +75,7 @@ async function initializeDatabase() {
     await db.query(schemaSql);
     console.log('Database tables verified and created successfully.');
 
-    if (process.env.NODE_ENV !== 'production') {
+    if (!isProduction) {
       const seedPath = path.join(__dirname, 'seed.dev.sql');
       if (fs.existsSync(seedPath)) {
         await db.query(fs.readFileSync(seedPath, 'utf8'));
