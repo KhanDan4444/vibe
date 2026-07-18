@@ -15,6 +15,7 @@ const auth = require('../middleware/auth');
 const adminCheck = require('../middleware/adminCheck');
 const { ROLES } = require('../utils/roles');
 const { DUE_SOON_DAYS } = require('../utils/memberStatus');
+const { MEMBER_UNPAID_SQL } = require('../utils/memberListSql');
 const { createDefaultBranch } = require('../utils/branches');
 const { assignSaasPlanToGym } = require('../utils/saasSubscription');
 const { gymHasPaymentForCurrentTerm, validatePaymentDate, calendarDateString, minimumRenewStartDate, queryGymPaidForCurrentTerm, queryHasPaidTermStartingOn, queryPaymentExistsOnCalendarDate } = require('../utils/saasPayments');
@@ -59,7 +60,10 @@ const { ACTIONS, recordAuditLog } = require('../utils/auditLog');
 const GYM_LIST_BASE = `
   SELECT
     g.*,
-    COUNT(m.id) FILTER (WHERE LOWER(m.status) = 'active')::int AS active_member_count,
+    COUNT(m.id) FILTER (
+      WHERE m.end_date > CURRENT_DATE + INTERVAL '${DUE_SOON_DAYS} days'
+        AND NOT (${MEMBER_UNPAID_SQL})
+    )::int AS active_member_count,
     gs.saas_plan_id AS saas_plan_id,
     gs.plan AS saas_plan_name,
     gs.start_date AS saas_start_date,
@@ -292,11 +296,17 @@ router.get('/gyms/:id', async (req, res, next) => {
       `
       SELECT
         COUNT(*)::int AS total_members,
-        COUNT(*) FILTER (WHERE LOWER(status) = 'active')::int AS active_members,
-        COUNT(*) FILTER (WHERE LOWER(status) = 'expired')::int AS expired_members,
-        COUNT(*) FILTER (WHERE LOWER(status) = 'due soon')::int AS due_soon_members
-      FROM Members
-      WHERE gym_id = $1
+        COUNT(*) FILTER (
+          WHERE m.end_date > CURRENT_DATE + INTERVAL '${DUE_SOON_DAYS} days'
+            AND NOT (${MEMBER_UNPAID_SQL})
+        )::int AS active_members,
+        COUNT(*) FILTER (WHERE m.end_date < CURRENT_DATE)::int AS expired_members,
+        COUNT(*) FILTER (
+          WHERE m.end_date >= CURRENT_DATE
+            AND m.end_date <= CURRENT_DATE + INTERVAL '${DUE_SOON_DAYS} days'
+        )::int AS due_soon_members
+      FROM Members m
+      WHERE m.gym_id = $1
       `,
       [id]
       ),
@@ -820,13 +830,19 @@ router.get('/dashboard', async (req, res, next) => {
         SELECT COUNT(*)::int AS count FROM Gyms g
         WHERE ${GYM_UNPAID_SQL}
       `),
-      db.query("SELECT COUNT(*) FROM Members WHERE LOWER(status) = 'active'"),
+      db.query(`
+        SELECT COUNT(*)::int AS count
+        FROM Members m
+        WHERE m.end_date > CURRENT_DATE + INTERVAL '${DUE_SOON_DAYS} days'
+          AND NOT (${MEMBER_UNPAID_SQL})
+      `),
       db.query(`
       SELECT COALESCE(AVG(member_count), 0) AS avg_members_per_gym FROM (
         SELECT COUNT(*) AS member_count 
-        FROM Members 
-        WHERE LOWER(status) = 'active' 
-        GROUP BY gym_id
+        FROM Members m
+        WHERE m.end_date > CURRENT_DATE + INTERVAL '${DUE_SOON_DAYS} days'
+          AND NOT (${MEMBER_UNPAID_SQL})
+        GROUP BY m.gym_id
       ) AS sub;
     `),
       db.query(`
@@ -844,7 +860,10 @@ router.get('/dashboard', async (req, res, next) => {
         AND gs.end_date BETWEEN CURRENT_DATE AND CURRENT_DATE + INTERVAL '${DUE_SOON_DAYS} days'
     `),
       db.query(`
-      SELECT g.name, COUNT(m.id) FILTER (WHERE LOWER(m.status) = 'active')::int AS active_members
+      SELECT g.name, COUNT(m.id) FILTER (
+        WHERE m.end_date > CURRENT_DATE + INTERVAL '${DUE_SOON_DAYS} days'
+          AND NOT (${MEMBER_UNPAID_SQL})
+      )::int AS active_members
       FROM Gyms g
       LEFT JOIN Members m ON m.gym_id = g.id
       GROUP BY g.id, g.name
@@ -1330,7 +1349,10 @@ const GYM_REPORT_BASE = `
     g.phone,
     g.subscription_status,
     g.created_at,
-    COUNT(m.id) FILTER (WHERE LOWER(m.status) = 'active')::int AS active_member_count,
+    COUNT(m.id) FILTER (
+      WHERE m.end_date > CURRENT_DATE + INTERVAL '${DUE_SOON_DAYS} days'
+        AND NOT (${MEMBER_UNPAID_SQL})
+    )::int AS active_member_count,
     COUNT(m.id)::int AS total_member_count,
     gs.plan AS saas_plan_name,
     sp.price AS saas_plan_price,
