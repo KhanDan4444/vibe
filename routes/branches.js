@@ -183,24 +183,6 @@ router.patch('/:id', requireGymOwner, requireActiveSubscription, validateParams(
       await db.query(`UPDATE Branches SET is_default = false WHERE gym_id = $1`, [gymId]);
     }
 
-    if (isActive === false) {
-      const staffRes = await db.query(
-        `
-        SELECT COUNT(*)::int AS count
-        FROM Users
-        WHERE gym_id = $1 AND branch_id = $2 AND is_active = true AND role = ANY($3::text[])
-        `,
-        [gymId, branchId, STAFF_ROLES]
-      );
-      if (staffRes.rows[0].count > 0) {
-        return res.status(400).json({
-          error: 'Reassign active staff at this branch before deactivating.',
-          code: 'BRANCH_HAS_STAFF',
-          staff_count: staffRes.rows[0].count,
-        });
-      }
-    }
-
     const result = await db.query(
       `
       UPDATE Branches
