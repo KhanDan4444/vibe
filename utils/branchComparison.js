@@ -5,6 +5,7 @@
 
 const db = require('../config/db');
 const { MEMBER_UNPAID_SQL } = require('./memberListSql');
+const { DUE_SOON_DAYS } = require('./memberStatus');
 const { computePercentChange } = require('./periodComparison');
 
 async function fetchBranchComparisonMetrics(gymId) {
@@ -37,15 +38,18 @@ async function fetchBranchComparisonMetrics(gymId) {
       ] = await Promise.all([
         db.query(`SELECT COUNT(*)::int AS count FROM Members WHERE gym_id = $1${memberFilter}`, params),
         db.query(
-          `SELECT COUNT(*)::int AS count FROM Members WHERE gym_id = $1${memberFilter} AND LOWER(status) = 'active'`,
+          `SELECT COUNT(*)::int AS count FROM Members m WHERE m.gym_id = $1${memberAliasFilter}
+            AND m.end_date > CURRENT_DATE + INTERVAL '${DUE_SOON_DAYS} days'
+            AND NOT (${MEMBER_UNPAID_SQL})`,
           params
         ),
         db.query(
-          `SELECT COUNT(*)::int AS count FROM Members WHERE gym_id = $1${memberFilter} AND LOWER(status) = 'due soon'`,
+          `SELECT COUNT(*)::int AS count FROM Members WHERE gym_id = $1${memberFilter}
+            AND end_date >= CURRENT_DATE AND end_date <= CURRENT_DATE + INTERVAL '${DUE_SOON_DAYS} days'`,
           params
         ),
         db.query(
-          `SELECT COUNT(*)::int AS count FROM Members WHERE gym_id = $1${memberFilter} AND LOWER(status) = 'expired'`,
+          `SELECT COUNT(*)::int AS count FROM Members WHERE gym_id = $1${memberFilter} AND end_date < CURRENT_DATE`,
           params
         ),
         db.query(

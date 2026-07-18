@@ -72,7 +72,9 @@ router.get('/', async (req, res, next) => {
     ] = await Promise.all([
       db.query(`SELECT COUNT(*)::int AS count FROM Members WHERE gym_id = $1${mb}`, qp),
       db.query(
-        `SELECT COUNT(*)::int AS count FROM Members WHERE gym_id = $1${mb} AND end_date > CURRENT_DATE + INTERVAL '${DUE_SOON_DAYS} days'`,
+        `SELECT COUNT(*)::int AS count FROM Members m WHERE m.gym_id = $1${ma}
+          AND m.end_date > CURRENT_DATE + INTERVAL '${DUE_SOON_DAYS} days'
+          AND NOT (${MEMBER_UNPAID_SQL})`,
         qp
       ),
       db.query(

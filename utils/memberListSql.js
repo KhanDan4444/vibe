@@ -26,7 +26,8 @@ function statusWhereSql(status) {
     return `m.end_date >= CURRENT_DATE AND m.end_date <= CURRENT_DATE + INTERVAL '${DUE_SOON_DAYS} days'`;
   }
   if (normalized === MEMBER_STATUS.ACTIVE) {
-    return `m.end_date > CURRENT_DATE + INTERVAL '${DUE_SOON_DAYS} days'`;
+    // Paid + valid term — unpaid members are not "active" for ops/reporting.
+    return `m.end_date > CURRENT_DATE + INTERVAL '${DUE_SOON_DAYS} days' AND NOT (${MEMBER_UNPAID_SQL})`;
   }
   return null;
 }
