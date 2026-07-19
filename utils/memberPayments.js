@@ -4,25 +4,27 @@
  * payments on or after start_date belong to the current term.
  */
 
-const { formatLocalDate, parseLocalDate, todayLocalString } = require('./localDate');
+const { formatLocalDate, parseLocalDate, todayLocalString, calendarDateString } = require('./localDate');
 const {
   validatePaymentDate: validatePaymentDateShared,
   normalizeIso,
 } = require('../shared/paymentDateRules');
 
-/** Normalize DB date/timestamp to YYYY-MM-DD in local calendar. */
-function calendarDateString(dateStr) {
-  if (!dateStr) return '';
+/** Normalize DB date/timestamp to YYYY-MM-DD (calendar day, no TZ shift). */
+function toCalendarDate(dateStr) {
+  const fromPgOrIso = calendarDateString(dateStr);
+  if (fromPgOrIso) return fromPgOrIso;
   const fromShared = normalizeIso(dateStr);
   if (fromShared) return fromShared;
+  if (!dateStr) return '';
   return formatLocalDate(parseLocalDate(dateStr));
 }
 
 /** Validate payment date against term start and today (canonical shared rules). */
 function validatePaymentDate(paymentDateStr, termStartDateStr) {
   return validatePaymentDateShared(
-    calendarDateString(paymentDateStr) || paymentDateStr,
-    calendarDateString(termStartDateStr) || termStartDateStr,
+    toCalendarDate(paymentDateStr) || paymentDateStr,
+    toCalendarDate(termStartDateStr) || termStartDateStr,
     todayLocalString()
   );
 }
@@ -70,7 +72,7 @@ async function queryHasPaymentForTermStart(dbOrClient, memberId, gymId, termStar
 
 /** SQL EXISTS — payment already recorded on this calendar date. */
 async function queryPaymentExistsOnCalendarDate(dbOrClient, memberId, gymId, paymentDateStr) {
-  const paymentDate = calendarDateString(paymentDateStr);
+  const paymentDate = toCalendarDate(paymentDateStr);
   if (!paymentDate) return false;
   const result = await dbOrClient.query(
     `
@@ -86,7 +88,7 @@ async function queryPaymentExistsOnCalendarDate(dbOrClient, memberId, gymId, pay
 
 /** SQL EXISTS — plan-change payment already on this calendar date (blocks duplicate change-plan, not enroll/renew). */
 async function queryChangePlanPaymentExistsOnCalendarDate(dbOrClient, memberId, gymId, paymentDateStr) {
-  const paymentDate = calendarDateString(paymentDateStr);
+  const paymentDate = toCalendarDate(paymentDateStr);
   if (!paymentDate) return false;
   const result = await dbOrClient.query(
     `
@@ -158,6 +160,6 @@ module.exports = {
   queryChangePlanPaymentExistsOnCalendarDate,
   addDaysToDateString,
   minimumRenewStartDate,
-  calendarDateString,
+  calendarDateString: toCalendarDate,
   validatePaymentDate,
 };

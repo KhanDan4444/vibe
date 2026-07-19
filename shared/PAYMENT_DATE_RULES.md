@@ -21,3 +21,5 @@ When changing a payment/term date rule, update in the **same PR**:
 | Term start with payment | term start `≤ today` |
 | Enroll start (paying) | start `≤ today`; skip-payment allows future |
 | Custom report range | `from ≤ to ≤ today` |
+
+**Server `today`:** `utils/localDate.js` `todayLocalString()` uses `APP_TIMEZONE` (default `Africa/Addis_Ababa`). Do not use `toISOString().slice(0, 10)` — that is UTC and rejects same-day payments when the host clock is still on the previous UTC day.

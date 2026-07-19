@@ -3,16 +3,11 @@
  * Term is identified by GymSubscriptions.start_date.
  */
 
-const { formatLocalDate, parseLocalDate, todayLocalString } = require('./localDate');
-
-function calendarDateString(dateStr) {
-  if (!dateStr) return '';
-  return formatLocalDate(parseLocalDate(dateStr));
-}
+const { formatLocalDate, parseLocalDate, todayLocalString, calendarDateString } = require('./localDate');
 
 function hasPaymentForTermStart(startDate, payments) {
   if (!startDate || !Array.isArray(payments)) return false;
-  const termStart = calendarDateString(startDate);
+  const termStart = calendarDateString(startDate) || formatLocalDate(parseLocalDate(startDate));
   return payments.some((p) => {
     const coverageStart = p.coverage_start_date ? calendarDateString(p.coverage_start_date) : null;
     if (coverageStart) return coverageStart === termStart;
@@ -26,8 +21,10 @@ function gymHasPaymentForCurrentTerm(subscription, payments) {
 }
 
 function validatePaymentDate(paymentDateStr, termStartDateStr) {
-  const paymentDate = calendarDateString(paymentDateStr);
-  const termStart = calendarDateString(termStartDateStr);
+  const paymentDate = calendarDateString(paymentDateStr) || formatLocalDate(parseLocalDate(paymentDateStr));
+  const termStart = termStartDateStr
+    ? calendarDateString(termStartDateStr) || formatLocalDate(parseLocalDate(termStartDateStr))
+    : '';
   const today = todayLocalString();
   if (!paymentDate) {
     return { ok: false, error: 'Invalid payment date.' };
