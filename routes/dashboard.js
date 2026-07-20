@@ -305,7 +305,7 @@ router.get('/', async (req, res, next) => {
         branchName: payment.branch_name,
         type: 'info',
         title: 'Payment Recorded',
-        message: `${prefix}Successfully recorded manual payment of $${parseFloat(payment.amount).toFixed(2)} from ${payment.member_name}.`,
+        message: `${prefix}${Number(payment.amount).toLocaleString()} ETB payment recorded for ${payment.member_name}.`,
         date: payment.date,
       });
     });
