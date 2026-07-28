@@ -97,11 +97,29 @@ async function consumeSession(sessionId) {
 const GENERIC_OTP_SENT =
   'If an account exists for that username, a verification code has been sent to the registered phone.';
 
+/** Same shape as a real OTP response — prevents account enumeration via missing sessionId. */
+function createDecoyOtpSession() {
+  return {
+    sessionId: crypto.randomUUID(),
+    expiresAt: new Date(Date.now() + sessionTtlMs()),
+  };
+}
+
+function buildOtpRequestPayload(sessionId, expiresAt) {
+  return {
+    message: GENERIC_OTP_SENT,
+    sessionId,
+    expiresAt,
+  };
+}
+
 module.exports = {
   PURPOSE,
   startPhoneOtpSession,
   getActiveSession,
   consumeSession,
+  createDecoyOtpSession,
+  buildOtpRequestPayload,
   GENERIC_OTP_SENT,
   normalizeEthiopianPhone,
 };

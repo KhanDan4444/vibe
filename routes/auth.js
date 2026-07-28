@@ -18,6 +18,7 @@ const bcrypt = require('bcrypt');
 const jwt = require('jsonwebtoken');
 const db = require('../config/db');
 const { ROLES } = require('../utils/roles');
+const { normalizeEthiopianPhone } = require('../utils/phone');
 const adminSetupGuard = require('../middleware/adminSetupGuard');
 const auth = require('../middleware/auth');
 const adminCheck = require('../middleware/adminCheck');
@@ -52,7 +53,8 @@ const {
   startPhoneOtpSession,
   getActiveSession,
   consumeSession,
-  GENERIC_OTP_SENT,
+  createDecoyOtpSession,
+  buildOtpRequestPayload,
 } = require('../utils/phoneOtp');
 const { registerGymWithOwner } = require('../utils/registerGymCore');
 const { linkSignupOtpToGym } = require('../utils/notificationSms');
@@ -417,34 +419,52 @@ router.post(
   validateBody(requestForgotOtpSchema),
   async (req, res, next) => {
     const { username } = req.body;
+    const phone = normalizeEthiopianPhone(username);
 
     try {
-      const result = await db.query(
-        `
-        SELECT u.id, u.role, g.phone
-        FROM Users u
-        JOIN Gyms g ON g.id = u.gym_id
-        WHERE u.role = $1
-          AND LOWER(u.username) = LOWER($2)
-        LIMIT 1
-        `,
-        [ROLES.GYM_OWNER, username]
-      );
+      const result = phone
+        ? await db.query(
+            `
+            SELECT u.id, u.role, g.phone
+            FROM Users u
+            JOIN Gyms g ON g.id = u.gym_id
+            WHERE u.role = $1
+              AND g.phone = $2
+            LIMIT 1
+            `,
+            [ROLES.GYM_OWNER, phone]
+          )
+        : await db.query(
+            `
+            SELECT u.id, u.role, g.phone
+            FROM Users u
+            JOIN Gyms g ON g.id = u.gym_id
+            WHERE u.role = $1
+              AND LOWER(u.username) = LOWER($2)
+            LIMIT 1
+            `,
+            [ROLES.GYM_OWNER, username]
+          );
+
+      let sessionId;
+      let expiresAt;
 
       if (result.rows.length > 0 && result.rows[0].phone) {
         try {
-          const { sessionId, expiresAt } = await startPhoneOtpSession(
+          ({ sessionId, expiresAt } = await startPhoneOtpSession(
             PURPOSE.FORGOT_PASSWORD,
             result.rows[0].phone,
             { userId: result.rows[0].id }
-          );
-          return res.json({ message: GENERIC_OTP_SENT, sessionId, expiresAt });
+          ));
         } catch (otpErr) {
           console.error('[forgot-password] OTP send failed:', otpErr.message);
+          ({ sessionId, expiresAt } = createDecoyOtpSession());
         }
+      } else {
+        ({ sessionId, expiresAt } = createDecoyOtpSession());
       }
 
-      res.json({ message: GENERIC_OTP_SENT });
+      res.json(buildOtpRequestPayload(sessionId, expiresAt));
     } catch (error) {
       next(error);
     }

@@ -313,7 +313,11 @@ const forgotPasswordSchema = z.object({
 });
 
 const requestForgotOtpSchema = z.object({
-  username: loginIdentifier,
+  username: z
+    .string()
+    .trim()
+    .min(1, 'Username or phone number is required')
+    .max(255),
 });
 
 const resetForgotOtpSchema = z.object({
