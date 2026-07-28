@@ -23,6 +23,7 @@ const express = require('express');
 const fs = require('fs');
 const path = require('path');
 const helmet = require('helmet');
+const cookieParser = require('cookie-parser');
 const db = require('./config/db');
 const { runDailyExpiryCheck } = require('./jobs/expiryCheck');
 const { startScheduler, stopScheduler } = require('./jobs/scheduler');
@@ -43,8 +44,9 @@ if (process.env.TRUST_PROXY === '1' || process.env.NODE_ENV === 'production') {
 const allowedOrigins = resolveAllowedOrigins();
 validateCorsConfig(allowedOrigins);
 
-app.use(helmet());
+app.use(helmet({ crossOriginResourcePolicy: { policy: 'cross-origin' } }));
 app.use(express.json({ limit: '4mb' }));
+app.use(cookieParser());
 app.use(createCorsMiddleware(allowedOrigins));
 app.use('/api', apiLimiter);
 

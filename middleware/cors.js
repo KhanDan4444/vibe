@@ -56,6 +56,7 @@ function createCorsMiddleware(allowedOrigins) {
 
     res.setHeader('Access-Control-Allow-Headers', allowHeaders);
     res.setHeader('Access-Control-Allow-Methods', allowMethods);
+    res.setHeader('Access-Control-Allow-Credentials', 'true');
 
     if (req.method === 'OPTIONS') {
       if (origin && !allowedOrigins.includes(origin)) {

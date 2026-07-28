@@ -58,6 +58,8 @@ const {
 } = require('../utils/phoneOtp');
 const { registerGymWithOwner } = require('../utils/registerGymCore');
 const { linkSignupOtpToGym } = require('../utils/notificationSms');
+const { setAuthCookie, clearAuthCookie } = require('../utils/authCookies');
+const { buildAuthSessionPayload } = require('../utils/authSessionResponse');
 const {
   createPasswordResetToken,
   consumeResetToken,
@@ -323,48 +325,44 @@ router.post('/login', loginLimiter, validateBody(loginSchema), async (req, res, 
       expiresIn: rememberMe ? '30d' : '1d',
     });
 
-    let subscription = null;
-    let branch = null;
-    if (user.gym_id) {
-      const gymResult = await db.query(
-        'SELECT name, subscription_status FROM Gyms WHERE id = $1',
-        [user.gym_id]
-      );
-      if (gymResult.rows.length > 0) {
-        const { describeGymSubscriptionAccess } = require('../utils/gymSubscriptionStatus');
-        subscription = {
-          gymName: gymResult.rows[0].name,
-          ...describeGymSubscriptionAccess(gymResult.rows[0].subscription_status),
-        };
-      }
-      if (user.branch_id) {
-        const branchResult = await db.query(
-          'SELECT id, name FROM Branches WHERE id = $1 AND gym_id = $2',
-          [user.branch_id, user.gym_id]
-        );
-        if (branchResult.rows.length > 0) {
-          branch = branchResult.rows[0];
-        }
-      }
-    }
+    setAuthCookie(res, token, Boolean(rememberMe));
+
+    const session = await buildAuthSessionPayload(user);
 
     res.json({
       token,
-      user: {
-        id: user.id,
-        name: user.name,
-        email: user.email,
-        username: user.username ?? null,
-        role: user.role,
-        gym_id: user.gym_id,
-        branch_id: user.branch_id ?? null,
-        branch_name: branch?.name ?? null,
-      },
-      subscription,
+      ...session,
     });
   } catch (error) {
     next(error);
   }
+});
+
+/**
+ * GET /api/auth/session
+ * Restore web session from httpOnly cookie (also works with Bearer for mobile).
+ */
+router.get('/session', auth, async (req, res, next) => {
+  try {
+    const result = await db.query('SELECT * FROM Users WHERE id = $1', [req.user.id]);
+    if (result.rows.length === 0) {
+      return res.status(401).json({ error: 'Session invalid. Please log in again.' });
+    }
+
+    const session = await buildAuthSessionPayload(result.rows[0]);
+    res.json(session);
+  } catch (error) {
+    next(error);
+  }
+});
+
+/**
+ * POST /api/auth/logout
+ * Clear httpOnly session cookie (web).
+ */
+router.post('/logout', (req, res) => {
+  clearAuthCookie(res);
+  res.json({ message: 'Signed out.' });
 });
 
 /**
@@ -598,6 +596,23 @@ router.post('/change-password', changePasswordLimiter, auth, validateBody(change
       [hashedPassword, user.id]
     );
     await db.query('DELETE FROM PasswordResetTokens WHERE user_id = $1', [user.id]);
+
+    const refreshed = await db.query(
+      `SELECT id, name, email, username, role, gym_id, branch_id, password_changed_at FROM Users WHERE id = $1`,
+      [user.id]
+    );
+    if (refreshed.rows.length > 0) {
+      const payload = buildTokenPayload(refreshed.rows[0]);
+      const previousToken = auth.extractToken(req);
+      let expiresIn = '1d';
+      if (previousToken) {
+        const decoded = jwt.decode(previousToken);
+        const remainingSec = decoded?.exp ? decoded.exp - Math.floor(Date.now() / 1000) : 0;
+        if (remainingSec > 60) expiresIn = remainingSec;
+      }
+      const nextToken = jwt.sign(payload, process.env.JWT_SECRET, { expiresIn });
+      setAuthCookie(res, nextToken, expiresIn > 86400);
+    }
 
     res.json({ message: 'Password changed successfully.' });
   } catch (error) {

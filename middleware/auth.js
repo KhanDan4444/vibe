@@ -1,21 +1,34 @@
 /**
  * @file middleware/auth.js
  * @description JWT authentication with database re-validation (role, gym_id, password stamp).
+ * Accepts Bearer token (mobile) or httpOnly cookie (web).
  */
 
 const jwt = require('jsonwebtoken');
 const db = require('../config/db');
 const { passwordChangedStamp } = require('../utils/authTokens');
+const { AUTH_COOKIE } = require('../utils/authCookies');
 
-module.exports = async function auth(req, res, next) {
+function extractToken(req) {
   const authHeader = req.header('Authorization');
-  if (!authHeader) {
-    return res.status(401).json({ error: 'Access denied. No token provided.' });
+  if (authHeader) {
+    const parts = authHeader.split(' ');
+    if (parts.length === 2 && parts[0].toLowerCase() === 'bearer' && parts[1]) {
+      return parts[1];
+    }
   }
 
-  const token = authHeader.split(' ')[1];
+  if (req.cookies?.[AUTH_COOKIE]) {
+    return req.cookies[AUTH_COOKIE];
+  }
+
+  return null;
+}
+
+module.exports = async function auth(req, res, next) {
+  const token = extractToken(req);
   if (!token) {
-    return res.status(401).json({ error: 'Access denied. Invalid token format.' });
+    return res.status(401).json({ error: 'Access denied. No token provided.' });
   }
 
   let decoded;
@@ -79,3 +92,5 @@ module.exports = async function auth(req, res, next) {
     return res.status(500).json({ error: 'Authentication failed.' });
   }
 };
+
+module.exports.extractToken = extractToken;
