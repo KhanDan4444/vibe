@@ -132,6 +132,7 @@ router.get('/', async (req, res, next) => {
           m.name,
           m.plan_id,
           m.end_date,
+          m.photo_url,
           CASE
             WHEN m.end_date < CURRENT_DATE THEN 'expired'
             WHEN m.end_date <= CURRENT_DATE + INTERVAL '${DUE_SOON_DAYS} days' THEN 'due soon'
