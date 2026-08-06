@@ -8,15 +8,18 @@ const { formatDisplayDateFromIso } = require('./localDate');
 const { sendSms, isSmsConfigured } = require('./afroMessage');
 const { normalizeEthiopianPhone } = require('./phone');
 const { ROLES } = require('./roles');
+const { SMS_BRAND } = require('./brand');
 
 const SMS_TYPES = Object.freeze({
   MEMBER_DUE_SOON: 'member_due_soon',
   MEMBER_EXPIRES_TODAY: 'member_expires_today',
   MEMBER_EXPIRED: 'member_expired',
+  MEMBER_RENEWED: 'member_renewed',
   GYM_LICENSE_DUE_SOON: 'gym_license_due_soon',
   GYM_LICENSE_DUE_IN_3_DAYS: 'gym_license_due_in_3_days',
   GYM_LICENSE_EXPIRES_TODAY: 'gym_license_expires_today',
   GYM_LICENSE_EXPIRED: 'gym_license_expired',
+  GYM_LICENSE_RENEWED: 'gym_license_renewed',
   OTP_FORGOT_PASSWORD: 'otp_forgot_password',
   OTP_GYM_SIGNUP: 'otp_gym_signup',
 });
@@ -177,12 +180,25 @@ async function smsMemberExpired(member, gymName) {
   });
 }
 
+async function smsMemberRenewed(member, gymName, endDate) {
+  if (!member.phone) return false;
+  const ends = formatDisplayDateFromIso(endDate) || 'soon';
+  const message = `Hi ${member.name}, your membership at ${gymName} has been renewed. Your new term ends on ${ends}. Thank you.`;
+  return deliverSms({
+    to: member.phone,
+    message,
+    messageType: SMS_TYPES.MEMBER_RENEWED,
+    entityType: 'member',
+    entityId: member.id,
+  });
+}
+
 async function smsGymLicenseDueIn3Days(gym, endDate, planName) {
   const contact = await getGymOwnerContact(gym.id);
   const phone = contact?.phone || gym.phone;
   if (!phone) return false;
   const gymName = gym.name || contact?.gym_name || 'your gym';
-  const message = `VibeSaaS: Your platform license for ${gymName} (${planName || 'plan'}) ends in 3 days (${formatDisplayDateFromIso(endDate)}). Contact your administrator to renew.`;
+  const message = `${SMS_BRAND}: Your platform license for ${gymName} (${planName || 'plan'}) ends in 3 days (${formatDisplayDateFromIso(endDate)}). Contact your administrator to renew.`;
   return deliverSms({
     to: phone,
     message,
@@ -197,7 +213,7 @@ async function smsGymLicenseExpiresToday(gym) {
   const phone = contact?.phone || gym.phone;
   if (!phone) return false;
   const gymName = gym.name || contact?.gym_name || 'your gym';
-  const message = `VibeSaaS: Your platform license for ${gymName} expires today. Renew now to avoid interruption.`;
+  const message = `${SMS_BRAND}: Your platform license for ${gymName} expires today. Renew now to avoid interruption.`;
   return deliverSms({
     to: phone,
     message,
@@ -212,11 +228,27 @@ async function smsGymLicenseExpired(gym, endDate) {
   const phone = contact?.phone || gym.phone;
   if (!phone) return false;
   const gymName = gym.name || contact?.gym_name || 'your gym';
-  const message = `VibeSaaS: Your platform license for ${gymName} expired on ${formatDisplayDateFromIso(endDate)}. Contact your administrator to restore access.`;
+  const message = `${SMS_BRAND}: Your platform license for ${gymName} expired on ${formatDisplayDateFromIso(endDate)}. Contact your administrator to restore access.`;
   return deliverSms({
     to: phone,
     message,
     messageType: SMS_TYPES.GYM_LICENSE_EXPIRED,
+    entityType: 'gym',
+    entityId: gym.id,
+  });
+}
+
+async function smsGymLicenseRenewed(gym, endDate, planName) {
+  const contact = await getGymOwnerContact(gym.id);
+  const phone = contact?.phone || gym.phone;
+  if (!phone) return false;
+  const gymName = gym.name || contact?.gym_name || 'your gym';
+  const ends = formatDisplayDateFromIso(endDate) || 'soon';
+  const message = `${SMS_BRAND}: Your platform license for ${gymName} (${planName || 'plan'}) has been renewed. New term ends on ${ends}.`;
+  return deliverSms({
+    to: phone,
+    message,
+    messageType: SMS_TYPES.GYM_LICENSE_RENEWED,
     entityType: 'gym',
     entityId: gym.id,
   });
@@ -230,8 +262,10 @@ module.exports = {
   smsMemberDueSoon,
   smsMemberExpiresToday,
   smsMemberExpired,
+  smsMemberRenewed,
   smsGymLicenseDueIn3Days,
   smsGymLicenseExpiresToday,
   smsGymLicenseExpired,
+  smsGymLicenseRenewed,
   getGymOwnerContact,
 };

@@ -51,6 +51,7 @@ const {
   resolveMemberPhotoOnDisk,
 } = require('../utils/memberPhotos');
 const { PAYMENT_SOURCES } = require('../utils/paymentSources');
+const { getGymOwnerContact, smsMemberRenewed } = require('../utils/notificationSms');
 
 router.use(auth, checkSubscription, requireGymAccess);
 
@@ -523,8 +524,16 @@ router.post('/:id/renew', requireActiveSubscription, validateParams(idParamSchem
     });
 
     await client.query('COMMIT');
+
+    const renewedMember = updatedMember.rows[0];
+    void getGymOwnerContact(gym_id)
+      .then((contact) =>
+        smsMemberRenewed(renewedMember, contact?.gym_name || 'your gym', renewedMember.end_date)
+      )
+      .catch((err) => console.error('[SMS] Member renewal confirmation failed:', err.message));
+
     res.json({
-      member: updatedMember.rows[0],
+      member: renewedMember,
       payment: paymentResult.rows[0],
     });
   } catch (error) {

@@ -106,7 +106,7 @@ async function sendOtp(to, options = {}) {
     len: String(otpLength()),
     t: '0',
     ttl: String(otpTtlSeconds()),
-    pr: options.prefix || 'Your VibeSaaS verification code is',
+    pr: options.prefix || 'ንቁ: Your verification code is',
     ps: options.postfix || '',
     sb: '1',
     sa: '1',

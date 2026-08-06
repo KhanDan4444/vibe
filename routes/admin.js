@@ -39,6 +39,7 @@ const {
 } = require('../utils/gymListSql');
 const { validatePlanPaymentAmount } = require('../utils/paymentValidation');
 const { PAYMENT_SOURCES } = require('../utils/paymentSources');
+const { smsGymLicenseRenewed } = require('../utils/notificationSms');
 const { validateBody, validateParams, validateQuery } = require('../middleware/validate');
 const {
   adminGymListQuerySchema,
@@ -555,8 +556,16 @@ router.post('/gyms/:id/renew', validateParams(idParamSchema), validateBody(renew
     );
 
     await client.query('COMMIT');
+
+    const gym = gymResult.rows[0];
+    void smsGymLicenseRenewed(
+      { id: gym.id, name: gym.name, phone: gym.phone },
+      subscription.end_date,
+      subscription.plan.name
+    ).catch((err) => console.error('[SMS] Gym renewal confirmation failed:', err.message));
+
     res.json({
-      gym: { ...gymResult.rows[0], subscription_status: 'active' },
+      gym: { ...gym, subscription_status: 'active' },
       subscription: {
         plan_name: subscription.plan.name,
         start_date: subscription.start_date,
@@ -935,6 +944,7 @@ const GYM_LICENSE_SMS_TYPES = [
   'gym_license_due_in_3_days',
   'gym_license_expires_today',
   'gym_license_expired',
+  'gym_license_renewed',
 ];
 
 const OTP_SMS_TYPES = [

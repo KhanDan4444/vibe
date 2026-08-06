@@ -33,8 +33,8 @@ async function startPhoneOtpSession(purpose, phone, meta = {}) {
 
   const otpResult = await sendOtp(normalized, {
     prefix: purpose === PURPOSE.GYM_SIGNUP
-      ? 'Your VibeSaaS registration code is'
-      : 'Your VibeSaaS password reset code is',
+      ? 'ንቁ: Your registration code is'
+      : 'ንቁ: Your password reset code is',
     postfix: '',
   });
 

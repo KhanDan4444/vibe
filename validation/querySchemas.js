@@ -90,6 +90,7 @@ const ADMIN_SMS_TYPE_VALUES = [
   'gym_license_due_in_3_days',
   'gym_license_expires_today',
   'gym_license_expired',
+  'gym_license_renewed',
   'otp_forgot_password',
   'otp_gym_signup',
 ];
@@ -99,6 +100,7 @@ const MEMBER_SMS_TYPE_VALUES = [
   'member_due_soon',
   'member_expires_today',
   'member_expired',
+  'member_renewed',
 ];
 
 const adminGymSmsQuerySchema = paginationQuerySchema.extend({
