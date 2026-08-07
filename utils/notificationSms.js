@@ -15,6 +15,7 @@ const SMS_TYPES = Object.freeze({
   MEMBER_EXPIRES_TODAY: 'member_expires_today',
   MEMBER_EXPIRED: 'member_expired',
   MEMBER_RENEWED: 'member_renewed',
+  MEMBER_ENROLLED: 'member_enrolled',
   GYM_LICENSE_DUE_SOON: 'gym_license_due_soon',
   GYM_LICENSE_DUE_IN_3_DAYS: 'gym_license_due_in_3_days',
   GYM_LICENSE_EXPIRES_TODAY: 'gym_license_expires_today',
@@ -193,6 +194,26 @@ async function smsMemberRenewed(member, gymName, endDate) {
   });
 }
 
+/**
+ * @param {{ id: number, name: string, phone?: string }} member
+ * @param {string} gymName
+ * @param {{ planName?: string, startDate?: string, endDate?: string }} term
+ */
+async function smsMemberEnrolled(member, gymName, term = {}) {
+  if (!member.phone) return false;
+  const start = formatDisplayDateFromIso(term.startDate) || 'today';
+  const ends = formatDisplayDateFromIso(term.endDate) || 'soon';
+  const plan = term.planName ? String(term.planName).trim() : 'your plan';
+  const message = `Hi ${member.name}, you are registered at ${gymName} on ${start}. Plan: ${plan}. Your membership ends on ${ends}. Welcome!`;
+  return deliverSms({
+    to: member.phone,
+    message,
+    messageType: SMS_TYPES.MEMBER_ENROLLED,
+    entityType: 'member',
+    entityId: member.id,
+  });
+}
+
 async function smsGymLicenseDueIn3Days(gym, endDate, planName) {
   const contact = await getGymOwnerContact(gym.id);
   const phone = contact?.phone || gym.phone;
@@ -263,6 +284,7 @@ module.exports = {
   smsMemberExpiresToday,
   smsMemberExpired,
   smsMemberRenewed,
+  smsMemberEnrolled,
   smsGymLicenseDueIn3Days,
   smsGymLicenseExpiresToday,
   smsGymLicenseExpired,

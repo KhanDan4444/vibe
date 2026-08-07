@@ -101,6 +101,7 @@ const MEMBER_SMS_TYPE_VALUES = [
   'member_expires_today',
   'member_expired',
   'member_renewed',
+  'member_enrolled',
 ];
 
 const adminGymSmsQuerySchema = paginationQuerySchema.extend({

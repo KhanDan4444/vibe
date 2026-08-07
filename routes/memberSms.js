@@ -20,6 +20,7 @@ const MEMBER_SMS_TYPES = [
   'member_expires_today',
   'member_expired',
   'member_renewed',
+  'member_enrolled',
 ];
 
 router.use(auth, checkSubscription, requireGymAccess, requireGymOwner);

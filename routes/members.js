@@ -51,7 +51,7 @@ const {
   resolveMemberPhotoOnDisk,
 } = require('../utils/memberPhotos');
 const { PAYMENT_SOURCES } = require('../utils/paymentSources');
-const { getGymOwnerContact, smsMemberRenewed } = require('../utils/notificationSms');
+const { getGymOwnerContact, smsMemberRenewed, smsMemberEnrolled } = require('../utils/notificationSms');
 
 router.use(auth, checkSubscription, requireGymAccess);
 
@@ -144,7 +144,7 @@ router.post('/enroll', requireActiveSubscription, validateBody(enrollMemberSchem
     const branch_id = await resolveMemberBranchId(req, bodyBranchId, client);
 
     const planResult = await client.query(
-      'SELECT duration, price FROM Plans WHERE id = $1 AND gym_id = $2',
+      'SELECT duration, price, name FROM Plans WHERE id = $1 AND gym_id = $2',
       [plan_id, gym_id]
     );
     if (planResult.rows.length === 0) {
@@ -152,7 +152,7 @@ router.post('/enroll', requireActiveSubscription, validateBody(enrollMemberSchem
       return res.status(404).json({ error: 'Membership plan not found.' });
     }
 
-    const { duration, price: planPrice } = planResult.rows[0];
+    const { duration, price: planPrice, name: planName } = planResult.rows[0];
     const end_date = calculateEndDate(start_date, duration);
     const status = deriveMemberStatusFromEndDate(end_date);
 
@@ -222,6 +222,17 @@ router.post('/enroll', requireActiveSubscription, validateBody(enrollMemberSchem
     });
 
     await client.query('COMMIT');
+
+    void getGymOwnerContact(gym_id)
+      .then((contact) =>
+        smsMemberEnrolled(member, contact?.gym_name || 'your gym', {
+          planName,
+          startDate: member.start_date,
+          endDate: member.end_date,
+        })
+      )
+      .catch((err) => console.error('[SMS] Member enrollment confirmation failed:', err.message));
+
     res.status(201).json({ member, payment });
   } catch (error) {
     await client.query('ROLLBACK');
