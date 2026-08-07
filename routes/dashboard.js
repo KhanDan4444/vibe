@@ -19,10 +19,6 @@ const { isGymOwner } = require('../utils/roles');
 
 router.use(auth, checkSubscription, requireGymAccess);
 
-function branchLabel(prefix, name) {
-  return prefix && name ? `[${name}] ` : '';
-}
-
 router.get('/branch-comparison', async (req, res, next) => {
   if (!isGymOwner(req.user.role)) {
     return res.status(403).json({ error: 'Access denied. Gym owners only.' });
@@ -48,7 +44,6 @@ router.get('/', async (req, res, next) => {
     const qp = gymBranchParams(gym_id, scope);
     const mb = scope.memberBareSql;
     const ma = scope.memberSql;
-    const showBranchLabels = !scope.branchId;
     const payBranch = scope.branchId
       ? ' JOIN Members m ON m.id = p.member_id AND m.gym_id = p.gym_id AND m.branch_id = $2'
       : '';
@@ -238,7 +233,6 @@ router.get('/', async (req, res, next) => {
     const notifications = [];
 
     unpaidAlertsRes.rows.forEach((member) => {
-      const prefix = branchLabel(showBranchLabels, member.branch_name);
       notifications.push({
         id: `unpaid-${member.id}`,
         kind: 'unpaid',
@@ -248,7 +242,7 @@ router.get('/', async (req, res, next) => {
         branchName: member.branch_name,
         type: 'warning',
         title: 'Payment Not Collected',
-        message: `${prefix}${member.name} was enrolled but has no payment on file for this term.`,
+        message: `${member.name} was enrolled but has no payment on file for this term.`,
         date: 'Action needed',
         suggestedAction: 'payment',
       });
@@ -256,7 +250,6 @@ router.get('/', async (req, res, next) => {
 
     dueSoonAlertsRes.rows.forEach((member) => {
       const planName = member.plan_name || 'Membership';
-      const prefix = branchLabel(showBranchLabels, member.branch_name);
       notifications.push({
         id: `due-${member.id}`,
         kind: 'due_soon',
@@ -268,7 +261,7 @@ router.get('/', async (req, res, next) => {
         branchName: member.branch_name,
         type: 'warning',
         title: 'Expiring Soon',
-        message: `${prefix}${member.name}'s ${planName} expires in less than 3 days (on ${member.end_date}).`,
+        message: `${member.name}'s ${planName} expires in less than 3 days (on ${member.end_date}).`,
         date: 'System Alert',
         suggestedAction: 'renew',
       });
@@ -276,7 +269,6 @@ router.get('/', async (req, res, next) => {
 
     expiredAlertsRes.rows.forEach((member) => {
       const planName = member.plan_name || 'Membership';
-      const prefix = branchLabel(showBranchLabels, member.branch_name);
       notifications.push({
         id: `exp-${member.id}`,
         kind: 'expired',
@@ -288,14 +280,13 @@ router.get('/', async (req, res, next) => {
         branchName: member.branch_name,
         type: 'danger',
         title: 'Membership Expired',
-        message: `${prefix}${member.name}'s ${planName} expired on ${member.end_date}.`,
+        message: `${member.name}'s ${planName} expired on ${member.end_date}.`,
         date: 'System Alert',
         suggestedAction: 'renew',
       });
     });
 
     recentPaymentsRes.rows.forEach((payment) => {
-      const prefix = branchLabel(showBranchLabels, payment.branch_name);
       notifications.push({
         id: `pay-${payment.id}`,
         kind: 'payment_recorded',
@@ -306,7 +297,7 @@ router.get('/', async (req, res, next) => {
         branchName: payment.branch_name,
         type: 'info',
         title: 'Payment Recorded',
-        message: `${prefix}${Number(payment.amount).toLocaleString()} ETB payment recorded for ${payment.member_name}.`,
+        message: `${Number(payment.amount).toLocaleString()} ETB payment recorded for ${payment.member_name}.`,
         date: payment.date,
       });
     });

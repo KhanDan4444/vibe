@@ -23,7 +23,7 @@ CREATE TABLE IF NOT EXISTS Users (
     email VARCHAR(255) UNIQUE,
     username VARCHAR(50) UNIQUE NOT NULL,
     password VARCHAR(255) NOT NULL,
-    role VARCHAR(50) NOT NULL, -- "Platform Admin", "Gym Owner", or staff job role e.g. "Help Desk"
+    role VARCHAR(50) NOT NULL, -- "Platform Admin", "Gym Owner", or staff job role e.g. "Front Desk"
     gym_id INT REFERENCES Gyms(id) ON DELETE SET NULL,
     is_active BOOLEAN DEFAULT true,
     password_changed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
@@ -185,11 +185,11 @@ FROM Branches b
 WHERE u.branch_id IS NULL
   AND u.gym_id = b.gym_id
   AND b.is_default = true
-  AND u.role IN ('Help Desk');
+  AND u.role IN ('Front Desk', 'Help Desk');
 
 -- Normalize legacy role/status values from earlier app versions
 UPDATE Users SET role = 'Platform Admin' WHERE role IN ('Admin', 'admin');
-UPDATE Users SET role = 'Help Desk' WHERE role = 'Gym Staff';
+UPDATE Users SET role = 'Front Desk' WHERE role IN ('Gym Staff', 'Help Desk');
 UPDATE Members SET status = LOWER(TRIM(status)) WHERE status IS NOT NULL AND status <> LOWER(TRIM(status));
 UPDATE Gyms SET subscription_status = LOWER(TRIM(subscription_status))
   WHERE subscription_status IS NOT NULL AND subscription_status <> LOWER(TRIM(subscription_status));

@@ -12,7 +12,7 @@ const requireGymAccess = require('../middleware/requireGymAccess');
 const requireGymOwner = require('../middleware/requireGymOwner');
 const checkSubscription = require('../middleware/subscriptionCheck');
 const requireActiveSubscription = require('../middleware/requireActiveSubscription');
-const { STAFF_ROLES, DEFAULT_STAFF_ROLE } = require('../utils/roles');
+const { STAFF_ROLES, ALL_STAFF_ROLES, normalizeStaffRole } = require('../utils/roles');
 const { validateBody, validateParams } = require('../middleware/validate');
 const { idParamSchema, createStaffSchema, updateStaffSchema, adminSetPasswordSchema } = require('../validation/schemas');
 const { ACTIONS, recordAuditLog } = require('../utils/auditLog');
@@ -41,7 +41,7 @@ async function findStaffInGym(staffId, gymId) {
     LEFT JOIN Branches b ON b.id = u.branch_id
     WHERE u.id = $1 AND u.gym_id = $2 AND u.role = ANY($3::text[])
     `,
-    [staffId, gymId, STAFF_ROLES]
+    [staffId, gymId, ALL_STAFF_ROLES]
   );
   return result.rows[0] || null;
 }
@@ -59,7 +59,7 @@ router.get('/', async (req, res, next) => {
       WHERE u.gym_id = $1 AND u.role = ANY($2::text[])
       ORDER BY u.name ASC
       `,
-      [req.user.gym_id, STAFF_ROLES]
+      [req.user.gym_id, ALL_STAFF_ROLES]
     );
     res.json({
       staff: result.rows.map(mapStaffRow),
@@ -74,7 +74,7 @@ router.get('/', async (req, res, next) => {
 router.post('/', requireActiveSubscription, validateBody(createStaffSchema), async (req, res, next) => {
   const { name, email, username, password, staff_role: staffRole, branch_id: branchId } = req.body;
   const gymId = req.user.gym_id;
-  const role = staffRole || DEFAULT_STAFF_ROLE;
+  const role = normalizeStaffRole(staffRole);
 
   try {
     await assertBranchInGym(branchId, gymId);
@@ -161,7 +161,7 @@ router.patch('/:id', requireActiveSubscription, validateParams(idParamSchema), v
         return res.status(409).json({ error: 'Email or username is already in use.' });
       }
     }
-    const nextRole = staffRole !== undefined ? staffRole : current.role;
+    const nextRole = staffRole !== undefined ? normalizeStaffRole(staffRole) : normalizeStaffRole(current.role);
     const nextActive = isActive !== undefined ? isActive : current.is_active;
 
     let hashedPassword = null;

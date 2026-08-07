@@ -9,7 +9,7 @@ const db = require('../config/db');
 const auth = require('../middleware/auth');
 const requireGymOwner = require('../middleware/requireGymOwner');
 const { parsePaginationQuery, paginatedResponse } = require('../utils/pagination');
-const { STAFF_ROLES } = require('../utils/roles');
+const { ALL_STAFF_ROLES } = require('../utils/roles');
 const { resolveBranchScope } = require('../utils/branchScope');
 
 router.use(auth, requireGymOwner);
@@ -46,7 +46,7 @@ router.get('/', async (req, res, next) => {
       params.push('Gym Owner');
     } else if (actorFilter === 'staff') {
       conditions.push(`a.actor_role = ANY($${params.length + 1}::text[])`);
-      params.push(STAFF_ROLES);
+      params.push(ALL_STAFF_ROLES);
     }
 
     const whereClause = conditions.join(' AND ');

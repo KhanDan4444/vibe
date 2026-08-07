@@ -88,10 +88,10 @@ async function main() {
   assert('Owner team canManage', ownerTeam.data.canManage === true);
 
   const helpdeskTeam = await request('GET', '/gym/team', null, helpdeskToken);
-  assert('Help Desk cannot access team API', !helpdeskTeam.ok && helpdeskTeam.status === 403);
+  assert('Front Desk cannot access team API', !helpdeskTeam.ok && helpdeskTeam.status === 403);
 
   const helpdeskActivity = await request('GET', '/gym/activity', null, helpdeskToken);
-  assert('Help Desk cannot access activity API', !helpdeskActivity.ok && helpdeskActivity.status === 403);
+  assert('Front Desk cannot access activity API', !helpdeskActivity.ok && helpdeskActivity.status === 403);
 
   const activeBranches = (branchList.data.branches || []).filter((b) => b.is_active !== false);
   const memberId = members.data.items[0]?.id;
@@ -129,7 +129,7 @@ async function main() {
 
   if (memberId) {
     const staffDeleteMember = await request('DELETE', `/members/${memberId}`, null, helpdeskToken);
-    assert('Help Desk cannot delete members', !staffDeleteMember.ok && staffDeleteMember.status === 403);
+    assert('Front Desk cannot delete members', !staffDeleteMember.ok && staffDeleteMember.status === 403);
   }
 
   const helpdeskBranchId = helpdesk.user?.branch_id;
@@ -162,7 +162,7 @@ async function main() {
           helpdeskToken
         );
         assert(
-          'Help Desk cannot delete payments (even in their branch)',
+          'Front Desk cannot delete payments (even in their branch)',
           !staffDeleteOwn.ok && staffDeleteOwn.status === 403
         );
         const staffUpdateOwn = await request(
@@ -176,7 +176,7 @@ async function main() {
           helpdeskToken
         );
         assert(
-          'Help Desk cannot edit payments',
+          'Front Desk cannot edit payments',
           !staffUpdateOwn.ok && staffUpdateOwn.status === 403
         );
       }
@@ -210,7 +210,7 @@ async function main() {
           helpdeskToken
         );
         assert(
-          'Help Desk cannot delete payment outside their branch',
+          'Front Desk cannot delete payment outside their branch',
           !crossDelete.ok && crossDelete.status === 403
         );
       }

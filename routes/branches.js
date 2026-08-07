@@ -11,7 +11,7 @@ const requireGymAccess = require('../middleware/requireGymAccess');
 const requireGymOwner = require('../middleware/requireGymOwner');
 const checkSubscription = require('../middleware/subscriptionCheck');
 const requireActiveSubscription = require('../middleware/requireActiveSubscription');
-const { isGymStaff, STAFF_ROLES } = require('../utils/roles');
+const { isGymStaff, ALL_STAFF_ROLES } = require('../utils/roles');
 const { validateBody, validateParams } = require('../middleware/validate');
 const {
   idParamSchema,
@@ -53,7 +53,7 @@ async function branchWithCounts(branchId, gymId) {
     WHERE b.id = $1 AND b.gym_id = $3
     GROUP BY b.id
     `,
-    [branchId, STAFF_ROLES, gymId]
+    [branchId, ALL_STAFF_ROLES, gymId]
   );
   return result.rows[0] ? mapBranch(result.rows[0]) : null;
 }
@@ -74,7 +74,7 @@ router.get('/', async (req, res, next) => {
         WHERE b.id = $1 AND b.gym_id = $3
         GROUP BY b.id
         `,
-        [req.user.branch_id, STAFF_ROLES, req.user.gym_id]
+        [req.user.branch_id, ALL_STAFF_ROLES, req.user.gym_id]
       );
       return res.json({ branches: result.rows.map(mapBranch) });
     }
@@ -86,7 +86,7 @@ router.get('/', async (req, res, next) => {
       GROUP BY b.id
       ORDER BY b.is_default DESC, b.name ASC
       `,
-      [req.user.gym_id, STAFF_ROLES]
+      [req.user.gym_id, ALL_STAFF_ROLES]
     );
     res.json({ branches: result.rows.map(mapBranch) });
   } catch (error) {
@@ -143,7 +143,7 @@ router.post(
         WHERE gym_id = $2 AND branch_id = $3 AND role = ANY($4::text[]) AND is_active = true
         RETURNING id, name, email, role
         `,
-        [targetBranchId, gymId, branchId, STAFF_ROLES]
+        [targetBranchId, gymId, branchId, ALL_STAFF_ROLES]
       );
 
       res.json({
