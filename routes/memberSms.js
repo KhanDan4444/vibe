@@ -32,11 +32,13 @@ router.use(auth, checkSubscription, requireGymAccess, requireGymOwner);
  * @queryparam {number} [limit=10]
  * @queryparam {string} [type] - member_due_soon | member_expires_today | member_expired | all
  * @queryparam {number|string} [branch_id]
+ * @queryparam {string} [search] - member name search
  */
 router.get('/', validateQuery(memberSmsQuerySchema), async (req, res, next) => {
   const gymId = req.user.gym_id;
   const { page, limit, offset } = parsePaginationQuery(req.query);
   const typeFilter = String(req.query.type || 'all').toLowerCase();
+  const search = String(req.query.search || '').trim();
 
   try {
     const scope = await resolveBranchScope(req);
@@ -59,6 +61,11 @@ router.get('/', validateQuery(memberSmsQuerySchema), async (req, res, next) => {
     if (typeFilter !== 'all' && MEMBER_SMS_TYPES.includes(typeFilter)) {
       conditions.push(`s.message_type = $${params.length + 1}`);
       params.push(typeFilter);
+    }
+
+    if (search) {
+      conditions.push(`m.name ILIKE $${params.length + 1}`);
+      params.push(`%${search}%`);
     }
 
     const whereClause = conditions.join(' AND ');

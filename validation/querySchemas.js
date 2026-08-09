@@ -118,6 +118,45 @@ const memberSmsQuerySchema = paginationQuerySchema.extend({
     z.enum(MEMBER_SMS_TYPE_VALUES)
   ),
   branch_id: optionalPositiveIntQuery,
+  search: optionalSearch,
+});
+
+const ACTIVITY_ACTOR_VALUES = ['all', 'owner', 'staff'];
+
+const ACTIVITY_ACTION_VALUES = [
+  'all',
+  'member',
+  'payment',
+  'plan',
+  'staff',
+  'member.created',
+  'member.enrolled',
+  'member.renewed',
+  'member.plan_changed',
+  'member.updated',
+  'member.transferred',
+  'member.deleted',
+  'payment.recorded',
+  'payment.updated',
+  'payment.deleted',
+  'plan.created',
+  'plan.updated',
+  'plan.deleted',
+  'staff.created',
+  'staff.updated',
+];
+
+const activityQuerySchema = paginationQuerySchema.extend({
+  actor: z.preprocess(
+    (v) => (v == null || v === '' ? 'all' : String(v).toLowerCase()),
+    z.enum(ACTIVITY_ACTOR_VALUES)
+  ),
+  action: z.preprocess(
+    (v) => (v == null || v === '' ? 'all' : String(v).toLowerCase()),
+    z.enum(ACTIVITY_ACTION_VALUES)
+  ),
+  search: optionalSearch,
+  branch_id: optionalPositiveIntQuery,
 });
 
 module.exports = {
@@ -127,4 +166,5 @@ module.exports = {
   adminPaymentListQuerySchema,
   adminGymSmsQuerySchema,
   memberSmsQuerySchema,
+  activityQuerySchema,
 };

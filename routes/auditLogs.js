@@ -11,6 +11,10 @@ const requireGymOwner = require('../middleware/requireGymOwner');
 const { parsePaginationQuery, paginatedResponse } = require('../utils/pagination');
 const { ALL_STAFF_ROLES } = require('../utils/roles');
 const { resolveBranchScope } = require('../utils/branchScope');
+const { validateQuery } = require('../middleware/validate');
+const { activityQuerySchema } = require('../validation/querySchemas');
+
+const ACTION_CATEGORIES = new Set(['member', 'payment', 'plan', 'staff']);
 
 router.use(auth, requireGymOwner);
 
@@ -20,12 +24,16 @@ router.use(auth, requireGymOwner);
  * @queryparam {number} [page=1]
  * @queryparam {number} [limit=10]
  * @queryparam {string} [actor] - owner | staff | all (default all)
+ * @queryparam {string} [action] - all | category (member|payment|plan|staff) | exact action key
+ * @queryparam {string} [search] - entity label or actor name
  * @queryparam {number|string} [branch_id] - filter by branch or all
  */
-router.get('/', async (req, res, next) => {
+router.get('/', validateQuery(activityQuerySchema), async (req, res, next) => {
   const gymId = req.user.gym_id;
   const { page, limit, offset } = parsePaginationQuery(req.query);
   const actorFilter = String(req.query.actor || 'all').toLowerCase();
+  const actionFilter = String(req.query.action || 'all').toLowerCase();
+  const search = String(req.query.search || '').trim();
 
   try {
     const scope = await resolveBranchScope(req);
@@ -47,6 +55,23 @@ router.get('/', async (req, res, next) => {
     } else if (actorFilter === 'staff') {
       conditions.push(`a.actor_role = ANY($${params.length + 1}::text[])`);
       params.push(ALL_STAFF_ROLES);
+    }
+
+    if (actionFilter !== 'all') {
+      if (ACTION_CATEGORIES.has(actionFilter)) {
+        conditions.push(`a.entity_type = $${params.length + 1}`);
+        params.push(actionFilter);
+      } else {
+        conditions.push(`a.action = $${params.length + 1}`);
+        params.push(actionFilter);
+      }
+    }
+
+    if (search) {
+      conditions.push(
+        `(a.entity_label ILIKE $${params.length + 1} OR a.actor_name ILIKE $${params.length + 1})`
+      );
+      params.push(`%${search}%`);
     }
 
     const whereClause = conditions.join(' AND ');
