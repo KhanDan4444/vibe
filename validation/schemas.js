@@ -46,7 +46,7 @@ const username = z
   .min(3, 'Username must be at least 3 characters')
   .max(30, 'Username must be at most 30 characters')
   .regex(/^[a-z0-9._]+$/, 'Username may only contain letters, numbers, dots, and underscores');
-const loginIdentifier = z.string().trim().min(1, 'Email or username is required').max(255);
+const loginIdentifier = z.string().trim().min(1, 'Email, username, or phone is required').max(255);
 const password = z.string().min(8, 'Password must be at least 8 characters').max(128);
 const otpCode = z.string().trim().min(4, 'Enter the verification code').max(8);
 const otpSessionId = z.string().uuid('Invalid or expired verification session');

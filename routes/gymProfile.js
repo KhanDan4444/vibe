@@ -13,6 +13,7 @@ const requireGymOwner = require('../middleware/requireGymOwner');
 const { ROLES } = require('../utils/roles');
 const { validateBody } = require('../middleware/validate');
 const { updateOwnerProfileSchema } = require('../validation/schemas');
+const { normalizeEthiopianPhone } = require('../utils/phone');
 
 router.use(auth, requireGymOwner);
 
@@ -91,7 +92,10 @@ router.patch('/', requireActiveSubscription, validateBody(updateOwnerProfileSche
     const gym = current.rows[0];
     const nextGymName = gym_name !== undefined ? gym_name.trim() : gym.name;
     const nextOwnerName = name !== undefined ? name.trim() : gym.owner_name;
-    const nextPhone = phone !== undefined ? phone : gym.phone;
+    let nextPhone = phone !== undefined ? phone : gym.phone;
+    if (nextPhone) {
+      nextPhone = normalizeEthiopianPhone(nextPhone) || nextPhone;
+    }
 
     const gymResult = await client.query(
       `

@@ -65,6 +65,11 @@ const {
   consumeResetToken,
 } = require('../utils/passwordReset');
 const { buildTokenPayload } = require('../utils/authTokens');
+const {
+  findGymOwnerByUsername,
+  findGymOwnersByPhone,
+  findUserForLogin,
+} = require('../utils/gymOwnerLookup');
 
 /**
  * POST /api/auth/register-gym
@@ -274,20 +279,11 @@ router.post('/login', loginLimiter, validateBody(loginSchema), async (req, res, 
   const { email, password, rememberMe } = req.body;
 
   try {
-    const result = await db.query(
-      `
-      SELECT * FROM Users
-      WHERE LOWER(email) = LOWER($1)
-         OR (username IS NOT NULL AND LOWER(username) = LOWER($1))
-      LIMIT 1
-      `,
-      [email]
-    );
-    if (result.rows.length === 0) {
+    const user = await findUserForLogin(email);
+    if (!user) {
       return res.status(400).json({ error: 'Invalid credentials.' });
     }
 
-    const user = result.rows[0];
     const isMatch = await bcrypt.compare(password, user.password);
 
     if (!isMatch) {
@@ -420,39 +416,31 @@ router.post(
     const phone = normalizeEthiopianPhone(username);
 
     try {
-      const result = phone
-        ? await db.query(
-            `
-            SELECT u.id, u.role, g.phone
-            FROM Users u
-            JOIN Gyms g ON g.id = u.gym_id
-            WHERE u.role = $1
-              AND g.phone = $2
-            LIMIT 1
-            `,
-            [ROLES.GYM_OWNER, phone]
-          )
-        : await db.query(
-            `
-            SELECT u.id, u.role, g.phone
-            FROM Users u
-            JOIN Gyms g ON g.id = u.gym_id
-            WHERE u.role = $1
-              AND LOWER(u.username) = LOWER($2)
-            LIMIT 1
-            `,
-            [ROLES.GYM_OWNER, username]
-          );
+      let owner = null;
+
+      if (phone) {
+        const owners = await findGymOwnersByPhone(phone);
+        if (owners.length > 1) {
+          return res.status(400).json({
+            error:
+              'Several gyms use this phone number. Enter your username to reset your password.',
+            code: 'PHONE_NOT_UNIQUE',
+          });
+        }
+        owner = owners[0] || null;
+      } else {
+        owner = await findGymOwnerByUsername(username);
+      }
 
       let sessionId;
       let expiresAt;
 
-      if (result.rows.length > 0 && result.rows[0].phone) {
+      if (owner?.phone && normalizeEthiopianPhone(owner.phone)) {
         try {
           ({ sessionId, expiresAt } = await startPhoneOtpSession(
             PURPOSE.FORGOT_PASSWORD,
-            result.rows[0].phone,
-            { userId: result.rows[0].id }
+            owner.phone,
+            { userId: owner.id }
           ));
         } catch (otpErr) {
           console.error('[forgot-password] OTP send failed:', otpErr.message);
