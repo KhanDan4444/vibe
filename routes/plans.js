@@ -59,7 +59,7 @@ router.get('/', async (req, res, next) => {
     const queryText = `
       SELECT p.*, COUNT(m.id) FILTER (WHERE LOWER(m.status) = 'active')::int AS active_member_count
       FROM Plans p
-      LEFT JOIN Members m ON m.plan_id = p.id AND m.gym_id = p.gym_id
+      LEFT JOIN Members m ON m.plan_id = p.id AND m.gym_id = p.gym_id AND m.deleted_at IS NULL
       WHERE p.gym_id = $1
       GROUP BY p.id
       ORDER BY p.price ASC;

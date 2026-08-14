@@ -4,7 +4,7 @@
  */
 
 const db = require('../config/db');
-const { MEMBER_UNPAID_SQL } = require('./memberListSql');
+const { MEMBER_UNPAID_SQL, MEMBER_LIVE_SQL, MEMBER_LIVE_BARE_SQL } = require('./memberListSql');
 const { DUE_SOON_DAYS } = require('./memberStatus');
 const { computePercentChange } = require('./periodComparison');
 
@@ -36,24 +36,24 @@ async function fetchBranchComparisonMetrics(gymId) {
         prevIncomeRes,
         newMembersRes,
       ] = await Promise.all([
-        db.query(`SELECT COUNT(*)::int AS count FROM Members WHERE gym_id = $1${memberFilter}`, params),
+        db.query(`SELECT COUNT(*)::int AS count FROM Members WHERE gym_id = $1${memberFilter}${MEMBER_LIVE_BARE_SQL}`, params),
         db.query(
-          `SELECT COUNT(*)::int AS count FROM Members m WHERE m.gym_id = $1${memberAliasFilter}
+          `SELECT COUNT(*)::int AS count FROM Members m WHERE m.gym_id = $1${memberAliasFilter}${MEMBER_LIVE_SQL}
             AND m.end_date > CURRENT_DATE + INTERVAL '${DUE_SOON_DAYS} days'
             AND NOT (${MEMBER_UNPAID_SQL})`,
           params
         ),
         db.query(
-          `SELECT COUNT(*)::int AS count FROM Members WHERE gym_id = $1${memberFilter}
+          `SELECT COUNT(*)::int AS count FROM Members WHERE gym_id = $1${memberFilter}${MEMBER_LIVE_BARE_SQL}
             AND end_date >= CURRENT_DATE AND end_date <= CURRENT_DATE + INTERVAL '${DUE_SOON_DAYS} days'`,
           params
         ),
         db.query(
-          `SELECT COUNT(*)::int AS count FROM Members WHERE gym_id = $1${memberFilter} AND end_date < CURRENT_DATE`,
+          `SELECT COUNT(*)::int AS count FROM Members WHERE gym_id = $1${memberFilter}${MEMBER_LIVE_BARE_SQL} AND end_date < CURRENT_DATE`,
           params
         ),
         db.query(
-          `SELECT COUNT(*)::int AS count FROM Members m WHERE m.gym_id = $1${memberAliasFilter} AND (${MEMBER_UNPAID_SQL})`,
+          `SELECT COUNT(*)::int AS count FROM Members m WHERE m.gym_id = $1${memberAliasFilter}${MEMBER_LIVE_SQL} AND (${MEMBER_UNPAID_SQL})`,
           params
         ),
         db.query(
@@ -78,7 +78,7 @@ async function fetchBranchComparisonMetrics(gymId) {
           `
           SELECT COUNT(*)::int AS count
           FROM Members
-          WHERE gym_id = $1${memberFilter}
+          WHERE gym_id = $1${memberFilter}${MEMBER_LIVE_BARE_SQL}
             AND date_trunc('month', start_date) = date_trunc('month', CURRENT_DATE)
           `,
           params

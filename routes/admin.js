@@ -15,7 +15,7 @@ const auth = require('../middleware/auth');
 const adminCheck = require('../middleware/adminCheck');
 const { ROLES } = require('../utils/roles');
 const { DUE_SOON_DAYS } = require('../utils/memberStatus');
-const { MEMBER_UNPAID_SQL } = require('../utils/memberListSql');
+const { MEMBER_UNPAID_SQL, MEMBER_LIVE_SQL } = require('../utils/memberListSql');
 const { createDefaultBranch } = require('../utils/branches');
 const { assignSaasPlanToGym } = require('../utils/saasSubscription');
 const { gymHasPaymentForCurrentTerm, validatePaymentDate, calendarDateString, minimumRenewStartDate, queryGymPaidForCurrentTerm, queryHasPaidTermStartingOn, queryPaymentExistsOnCalendarDate } = require('../utils/saasPayments');
@@ -73,7 +73,7 @@ const GYM_LIST_BASE = `
     sp.duration AS saas_plan_duration,
     ${GYM_IS_UNPAID_SELECT}
   FROM Gyms g
-  LEFT JOIN Members m ON m.gym_id = g.id
+  LEFT JOIN Members m ON m.gym_id = g.id AND m.deleted_at IS NULL
   LEFT JOIN GymSubscriptions gs ON gs.gym_id = g.id
   LEFT JOIN SaaSPlans sp ON sp.id = gs.saas_plan_id
   GROUP BY g.id, gs.saas_plan_id, gs.plan, gs.start_date, gs.end_date, sp.price, sp.duration
@@ -307,7 +307,7 @@ router.get('/gyms/:id', async (req, res, next) => {
             AND m.end_date <= CURRENT_DATE + INTERVAL '${DUE_SOON_DAYS} days'
         )::int AS due_soon_members
       FROM Members m
-      WHERE m.gym_id = $1
+      WHERE m.gym_id = $1${MEMBER_LIVE_SQL}
       `,
       [id]
       ),
@@ -842,14 +842,16 @@ router.get('/dashboard', async (req, res, next) => {
       db.query(`
         SELECT COUNT(*)::int AS count
         FROM Members m
-        WHERE m.end_date > CURRENT_DATE + INTERVAL '${DUE_SOON_DAYS} days'
+        WHERE m.deleted_at IS NULL
+          AND m.end_date > CURRENT_DATE + INTERVAL '${DUE_SOON_DAYS} days'
           AND NOT (${MEMBER_UNPAID_SQL})
       `),
       db.query(`
       SELECT COALESCE(AVG(member_count), 0) AS avg_members_per_gym FROM (
         SELECT COUNT(*) AS member_count 
         FROM Members m
-        WHERE m.end_date > CURRENT_DATE + INTERVAL '${DUE_SOON_DAYS} days'
+        WHERE m.deleted_at IS NULL
+          AND m.end_date > CURRENT_DATE + INTERVAL '${DUE_SOON_DAYS} days'
           AND NOT (${MEMBER_UNPAID_SQL})
         GROUP BY m.gym_id
       ) AS sub;
@@ -874,7 +876,7 @@ router.get('/dashboard', async (req, res, next) => {
           AND NOT (${MEMBER_UNPAID_SQL})
       )::int AS active_members
       FROM Gyms g
-      LEFT JOIN Members m ON m.gym_id = g.id
+      LEFT JOIN Members m ON m.gym_id = g.id AND m.deleted_at IS NULL
       GROUP BY g.id, g.name
       ORDER BY active_members DESC
       LIMIT 5
@@ -1376,7 +1378,7 @@ const GYM_REPORT_BASE = `
     ) AS owner_email,
     ${GYM_IS_UNPAID_SELECT}
   FROM Gyms g
-  LEFT JOIN Members m ON m.gym_id = g.id
+  LEFT JOIN Members m ON m.gym_id = g.id AND m.deleted_at IS NULL
   LEFT JOIN GymSubscriptions gs ON gs.gym_id = g.id
   LEFT JOIN SaaSPlans sp ON sp.id = gs.saas_plan_id
   GROUP BY g.id, gs.saas_plan_id, gs.plan, gs.start_date, gs.end_date, sp.price, sp.duration

@@ -13,6 +13,7 @@ const ACTIONS = Object.freeze({
   MEMBER_UPDATED: 'member.updated',
   MEMBER_TRANSFERRED: 'member.transferred',
   MEMBER_DELETED: 'member.deleted',
+  MEMBER_RESTORED: 'member.restored',
   PAYMENT_RECORDED: 'payment.recorded',
   PAYMENT_UPDATED: 'payment.updated',
   PAYMENT_DELETED: 'payment.deleted',

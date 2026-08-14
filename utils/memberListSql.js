@@ -17,6 +17,10 @@ const MEMBER_IS_UNPAID_SELECT = `
   ) AS is_unpaid
 `;
 
+/** Live roster only — archived members keep payment rows for reports. */
+const MEMBER_LIVE_SQL = ' AND m.deleted_at IS NULL';
+const MEMBER_LIVE_BARE_SQL = ' AND deleted_at IS NULL';
+
 function statusWhereSql(status) {
   const normalized = normalizeMemberStatus(status);
   if (normalized === MEMBER_STATUS.EXPIRED) {
@@ -66,12 +70,14 @@ function buildMemberListFilters(query, startParamIndex = 2) {
     }
   }
 
-  const whereExtra = conditions.length ? ` AND ${conditions.join(' AND ')}` : '';
+  const whereExtra = `${MEMBER_LIVE_SQL}${conditions.length ? ` AND ${conditions.join(' AND ')}` : ''}`;
   return { whereExtra, params, nextIndex: idx };
 }
 
 module.exports = {
   MEMBER_UNPAID_SQL,
   MEMBER_IS_UNPAID_SELECT,
+  MEMBER_LIVE_SQL,
+  MEMBER_LIVE_BARE_SQL,
   buildMemberListFilters,
 };

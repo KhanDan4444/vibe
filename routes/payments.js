@@ -82,7 +82,7 @@ router.post('/', requireActiveSubscription, validateBody(createPaymentSchema), a
     }
 
     let memberSql =
-      'SELECT m.id, m.name, m.start_date, m.plan_id, p.price AS plan_price FROM Members m LEFT JOIN Plans p ON p.id = m.plan_id WHERE m.id = $1 AND m.gym_id = $2';
+      'SELECT m.id, m.name, m.start_date, m.plan_id, p.price AS plan_price FROM Members m LEFT JOIN Plans p ON p.id = m.plan_id WHERE m.id = $1 AND m.gym_id = $2 AND m.deleted_at IS NULL';
     const memberParams = [member_id, gym_id];
     if (scope.branchId) {
       memberSql += ' AND m.branch_id = $3';
@@ -271,7 +271,7 @@ router.get('/', validateQuery(ownerPaymentListQuerySchema), async (req, res, nex
 
     let unpaidMembers = [];
     if (period.start || period.end) {
-      const unpaidConditions = [`m.gym_id = $1`, `(${MEMBER_UNPAID_SQL})`];
+      const unpaidConditions = [`m.gym_id = $1`, `m.deleted_at IS NULL`, `(${MEMBER_UNPAID_SQL})`];
       const unpaidParams = [gym_id];
       let uIdx = 2;
       if (scope.branchId) {
@@ -347,7 +347,7 @@ router.put('/:id', requireGymOwner, requireActiveSubscription, validateParams(id
     }
 
     const paymentRow = existing.rows[0];
-    await assertMemberBranchWritable(paymentRow.member_id, gymId);
+    await assertMemberBranchWritable(paymentRow.member_id, gymId, db, { includeArchived: true });
 
     const paymentDateCheck = validatePaymentDate(date, paymentRow.start_date);
     if (!paymentDateCheck.ok) {
@@ -422,7 +422,7 @@ router.delete('/:id', requireGymOwner, requireActiveSubscription, validateParams
     }
 
     const paymentRow = existing.rows[0];
-    await assertMemberBranchWritable(paymentRow.member_id, gymId);
+    await assertMemberBranchWritable(paymentRow.member_id, gymId, db, { includeArchived: true });
 
     await db.query('DELETE FROM Payments WHERE id = $1 AND gym_id = $2', [id, gymId]);
 

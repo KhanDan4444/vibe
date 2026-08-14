@@ -100,6 +100,7 @@ async function syncMemberStatuses() {
     UPDATE Members
     SET status = ${MEMBER_STATUS_CASE_SQL}
     WHERE LOWER(status) IN ('active', 'due soon', 'expired')
+      AND deleted_at IS NULL
     RETURNING id;
     `
   );
@@ -126,7 +127,7 @@ async function runDailyExpiryCheck() {
     const autoExpireQuery = `
       UPDATE Members
       SET status = $1
-      WHERE end_date < CURRENT_DATE AND LOWER(status) = $2
+      WHERE end_date < CURRENT_DATE AND LOWER(status) = $2 AND deleted_at IS NULL
       RETURNING id, name, phone, gym_id, end_date;
     `;
     const expiredResult = await db.query(autoExpireQuery, [
@@ -144,7 +145,8 @@ async function runDailyExpiryCheck() {
     const expiringSoonQuery = `
       SELECT m.id, m.name, m.phone, m.gym_id, m.end_date
       FROM Members m
-      WHERE m.end_date > CURRENT_DATE
+      WHERE m.deleted_at IS NULL
+        AND m.end_date > CURRENT_DATE
         AND m.end_date <= CURRENT_DATE + INTERVAL '${DUE_SOON_DAYS} days'
         AND LOWER(m.status) IN ($1, $2)
         AND NOT EXISTS (
@@ -168,7 +170,8 @@ async function runDailyExpiryCheck() {
     const expiringTodayQuery = `
       SELECT id, name, phone, gym_id, end_date
       FROM Members
-      WHERE end_date = CURRENT_DATE
+      WHERE deleted_at IS NULL
+        AND end_date = CURRENT_DATE
         AND LOWER(status) IN ($1, $2);
     `;
     const todayResult = await db.query(expiringTodayQuery, [

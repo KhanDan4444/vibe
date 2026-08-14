@@ -48,13 +48,14 @@ async function getBranchById(branchId, gymId, executor = db) {
   return result.rows[0] || null;
 }
 
-async function assertMemberBranchWritable(memberId, gymId, executor = db) {
+async function assertMemberBranchWritable(memberId, gymId, executor = db, options = {}) {
+  const liveSql = options.includeArchived ? '' : ' AND m.deleted_at IS NULL';
   const result = await executor.query(
     `
     SELECT m.id, b.is_active, b.name AS branch_name
     FROM Members m
     JOIN Branches b ON b.id = m.branch_id
-    WHERE m.id = $1 AND m.gym_id = $2
+    WHERE m.id = $1 AND m.gym_id = $2${liveSql}
     `,
     [memberId, gymId]
   );

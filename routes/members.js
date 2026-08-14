@@ -20,7 +20,7 @@ const { todayLocalString } = require('../utils/localDate');
 const { deriveMemberStatusFromEndDate, normalizeMemberStatus, MEMBER_STATUS } = require('../utils/memberStatus');
 const { parsePaginationQuery, paginatedResponse } = require('../utils/pagination');
 const { parseMemberListSortOrder } = require('../utils/listSortSql');
-const { buildMemberListFilters, MEMBER_IS_UNPAID_SELECT } = require('../utils/memberListSql');
+const { buildMemberListFilters, MEMBER_IS_UNPAID_SELECT, MEMBER_LIVE_BARE_SQL } = require('../utils/memberListSql');
 const { validateBody, validateParams, validateQuery } = require('../middleware/validate');
 const { memberListQuerySchema } = require('../validation/querySchemas');
 const {
@@ -271,7 +271,7 @@ router.get('/', validateQuery(memberListQuerySchema), async (req, res, next) => 
         WHEN end_date <= CURRENT_DATE + INTERVAL '3 days' THEN 'due soon'
         ELSE 'active'
       END
-      WHERE gym_id = $1${syncBranch} AND LOWER(status) IN ('active', 'due soon', 'expired')
+      WHERE gym_id = $1${syncBranch}${MEMBER_LIVE_BARE_SQL} AND LOWER(status) IN ('active', 'due soon', 'expired')
       `,
       syncParams
     );
@@ -298,6 +298,63 @@ router.get('/', validateQuery(memberListQuerySchema), async (req, res, next) => 
       WHERE m.gym_id = $1${scope.memberSql}${whereExtra}
       ORDER BY ${memberOrderBy}
       LIMIT $${limitIdx} OFFSET $${offsetIdx}
+      `,
+      pagedParams
+    );
+
+    const archivedCountResult = await db.query(
+      `SELECT COUNT(*)::int AS count FROM Members m WHERE m.gym_id = $1 AND m.deleted_at IS NOT NULL${scope.memberSql}`,
+      [gym_id, ...scope.params]
+    );
+    const archivedTotal = archivedCountResult.rows[0].count;
+
+    res.json(paginatedResponse(result.rows, total, page, limit, { archivedTotal }));
+  } catch (error) {
+    next(error);
+  }
+});
+
+/**
+ * GET /api/members/archived
+ * Former members (soft-deleted). Payment history is kept.
+ */
+router.get('/archived', validateQuery(memberListQuerySchema), async (req, res, next) => {
+  const gym_id = req.user.gym_id;
+  const { page, limit, offset } = parsePaginationQuery(req.query);
+
+  try {
+    const scope = await resolveBranchScope(req);
+    if (scope.error) {
+      return res.status(400).json({ error: scope.error });
+    }
+
+    const archivedWhere = `m.gym_id = $1 AND m.deleted_at IS NOT NULL${scope.memberSql}`;
+    const params = [gym_id, ...scope.params];
+
+    const search = String(req.query.search || '').trim();
+    let searchSql = '';
+    if (search) {
+      params.push(`%${search}%`);
+      searchSql = ` AND (m.name ILIKE $${params.length} OR COALESCE(m.phone, '') ILIKE $${params.length})`;
+    }
+
+    const whereSql = ` WHERE ${archivedWhere}${searchSql}`;
+    const countResult = await db.query(
+      `SELECT COUNT(*)::int AS count FROM Members m${whereSql}`,
+      params
+    );
+    const total = countResult.rows[0].count;
+
+    const pagedParams = [...params, limit, offset];
+    const result = await db.query(
+      `
+      SELECT m.*, p.name AS plan_name, b.name AS branch_name, ${MEMBER_IS_UNPAID_SELECT}
+      FROM Members m
+      LEFT JOIN Plans p ON p.id = m.plan_id
+      LEFT JOIN Branches b ON b.id = m.branch_id
+      ${whereSql}
+      ORDER BY m.deleted_at DESC, m.name ASC
+      LIMIT $${pagedParams.length - 1} OFFSET $${pagedParams.length}
       `,
       pagedParams
     );
@@ -434,7 +491,7 @@ router.post('/:id/renew', requireActiveSubscription, validateParams(idParamSchem
     }
 
     const memberResult = await client.query(
-      `SELECT * FROM Members WHERE id = $1 AND gym_id = $2${access.sql} FOR UPDATE`,
+      `SELECT * FROM Members WHERE id = $1 AND gym_id = $2${MEMBER_LIVE_BARE_SQL}${access.sql} FOR UPDATE`,
       [id, gym_id, ...access.params]
     );
     if (memberResult.rows.length === 0) {
@@ -580,7 +637,7 @@ router.post(
       }
 
       const memberResult = await client.query(
-        `SELECT * FROM Members WHERE id = $1 AND gym_id = $2${access.sql} FOR UPDATE`,
+        `SELECT * FROM Members WHERE id = $1 AND gym_id = $2${MEMBER_LIVE_BARE_SQL}${access.sql} FOR UPDATE`,
         [id, gym_id, ...access.params]
       );
       if (memberResult.rows.length === 0) {
@@ -777,7 +834,7 @@ router.post(
         SELECT m.*, b.name AS branch_name
         FROM Members m
         JOIN Branches b ON b.id = m.branch_id
-        WHERE m.id = $1 AND m.gym_id = $2
+        WHERE m.id = $1 AND m.gym_id = $2 AND m.deleted_at IS NULL
         `,
         [id, gym_id]
       );
@@ -864,7 +921,7 @@ router.put('/:id', requireActiveSubscription, validateParams(idParamSchema), val
     }
 
     const memberCheck = await db.query(
-      `SELECT * FROM Members WHERE id = $1 AND gym_id = $2${access.sql}`,
+      `SELECT * FROM Members WHERE id = $1 AND gym_id = $2${MEMBER_LIVE_BARE_SQL}${access.sql}`,
       [id, gym_id, ...access.params]
     );
     if (memberCheck.rows.length === 0) {
@@ -958,7 +1015,7 @@ router.put('/:id', requireActiveSubscription, validateParams(idParamSchema), val
 
 /**
  * DELETE /api/members/:id
- * @description Deletes a gym member. Gym owners only (staff may enroll/renew/update in-branch).
+ * Archives a member (soft-delete). Payment history stays for reports.
  */
 router.delete('/:id', requireGymOwner, requireActiveSubscription, validateParams(idParamSchema), async (req, res, next) => {
   const { id } = req.params;
@@ -967,21 +1024,21 @@ router.delete('/:id', requireGymOwner, requireActiveSubscription, validateParams
   try {
     await assertMemberBranchWritable(id, gym_id);
 
-    const deleteQuery = `
-      DELETE FROM Members 
-      WHERE id = $1 AND gym_id = $2
+    const result = await db.query(
+      `
+      UPDATE Members
+      SET deleted_at = CURRENT_TIMESTAMP
+      WHERE id = $1 AND gym_id = $2 AND deleted_at IS NULL
       RETURNING *;
-    `;
-    const result = await db.query(deleteQuery, [id, gym_id]);
+      `,
+      [id, gym_id]
+    );
 
     if (result.rows.length === 0) {
       return res.status(404).json({ error: 'Member not found or unauthorized.' });
     }
 
     const deleted = result.rows[0];
-    if (deleted.photo_url) {
-      await removeMemberPhotoFiles(gym_id, deleted.id);
-    }
     await recordAuditLog({
       req,
       action: ACTIONS.MEMBER_DELETED,
@@ -989,10 +1046,70 @@ router.delete('/:id', requireGymOwner, requireActiveSubscription, validateParams
       entityId: deleted.id,
       entityLabel: deleted.name,
     });
-    res.json({ message: 'Member successfully deleted.' });
+    res.json({ message: 'Member removed from the roster. Payment history is kept.' });
   } catch (error) {
     next(error);
   }
 });
+
+/**
+ * POST /api/members/:id/restore
+ * Restores an archived member to the live roster.
+ */
+router.post(
+  '/:id/restore',
+  requireGymOwner,
+  requireActiveSubscription,
+  validateParams(idParamSchema),
+  async (req, res, next) => {
+    const { id } = req.params;
+    const gym_id = req.user.gym_id;
+
+    try {
+      const access = await memberBranchClause(req);
+      if (access.error) {
+        return res.status(400).json({ error: access.error });
+      }
+
+      const result = await db.query(
+        `
+        UPDATE Members
+        SET deleted_at = NULL
+        WHERE id = $1 AND gym_id = $2 AND deleted_at IS NOT NULL${access.sql}
+        RETURNING *;
+        `,
+        [id, gym_id, ...access.params]
+      );
+
+      if (result.rows.length === 0) {
+        return res.status(404).json({ error: 'Former member not found.' });
+      }
+
+      const restored = result.rows[0];
+      const enriched = await db.query(
+        `
+        SELECT m.*, p.name AS plan_name, b.name AS branch_name, ${MEMBER_IS_UNPAID_SELECT}
+        FROM Members m
+        LEFT JOIN Plans p ON p.id = m.plan_id
+        LEFT JOIN Branches b ON b.id = m.branch_id
+        WHERE m.id = $1 AND m.gym_id = $2
+        `,
+        [id, gym_id]
+      );
+
+      await recordAuditLog({
+        req,
+        action: ACTIONS.MEMBER_RESTORED,
+        entityType: 'member',
+        entityId: restored.id,
+        entityLabel: restored.name,
+      });
+
+      res.json(enriched.rows[0] || restored);
+    } catch (error) {
+      next(error);
+    }
+  }
+);
 
 module.exports = router;

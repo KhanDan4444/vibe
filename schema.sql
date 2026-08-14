@@ -67,9 +67,14 @@ CREATE TABLE IF NOT EXISTS Members (
     end_date DATE NOT NULL,
     status VARCHAR(50) DEFAULT 'active', -- active, expired, due soon
     photo_url VARCHAR(512),
+    deleted_at TIMESTAMPTZ,
     -- Forces client-level member tracking records to remain uniform
     CONSTRAINT check_member_status_lowercase CHECK (status = LOWER(status))
 );
+
+CREATE INDEX IF NOT EXISTS idx_members_gym_live
+    ON Members (gym_id)
+    WHERE deleted_at IS NULL;
 
 -- 5. Create Payments Table
 CREATE TABLE IF NOT EXISTS Payments (

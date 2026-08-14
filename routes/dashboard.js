@@ -10,7 +10,7 @@ const auth = require('../middleware/auth');
 const checkSubscription = require('../middleware/subscriptionCheck');
 const requireGymAccess = require('../middleware/requireGymAccess');
 const requireGymOwner = require('../middleware/requireGymOwner');
-const { MEMBER_UNPAID_SQL } = require('../utils/memberListSql');
+const { MEMBER_UNPAID_SQL, MEMBER_LIVE_SQL, MEMBER_LIVE_BARE_SQL } = require('../utils/memberListSql');
 const { DUE_SOON_DAYS } = require('../utils/memberStatus');
 const { computePercentChange, computeCountDelta } = require('../utils/periodComparison');
 const { resolveBranchScope, gymBranchParams } = require('../utils/branchScope');
@@ -65,23 +65,23 @@ router.get('/', async (req, res, next) => {
       expiredAlertsRes,
       recentPaymentsRes,
     ] = await Promise.all([
-      db.query(`SELECT COUNT(*)::int AS count FROM Members WHERE gym_id = $1${mb}`, qp),
+      db.query(`SELECT COUNT(*)::int AS count FROM Members WHERE gym_id = $1${mb}${MEMBER_LIVE_BARE_SQL}`, qp),
       db.query(
-        `SELECT COUNT(*)::int AS count FROM Members m WHERE m.gym_id = $1${ma}
+        `SELECT COUNT(*)::int AS count FROM Members m WHERE m.gym_id = $1${ma}${MEMBER_LIVE_SQL}
           AND m.end_date > CURRENT_DATE + INTERVAL '${DUE_SOON_DAYS} days'
           AND NOT (${MEMBER_UNPAID_SQL})`,
         qp
       ),
       db.query(
-        `SELECT COUNT(*)::int AS count FROM Members WHERE gym_id = $1${mb} AND end_date < CURRENT_DATE`,
+        `SELECT COUNT(*)::int AS count FROM Members WHERE gym_id = $1${mb}${MEMBER_LIVE_BARE_SQL} AND end_date < CURRENT_DATE`,
         qp
       ),
       db.query(
-        `SELECT COUNT(*)::int AS count FROM Members WHERE gym_id = $1${mb} AND end_date >= CURRENT_DATE AND end_date <= CURRENT_DATE + INTERVAL '${DUE_SOON_DAYS} days'`,
+        `SELECT COUNT(*)::int AS count FROM Members WHERE gym_id = $1${mb}${MEMBER_LIVE_BARE_SQL} AND end_date >= CURRENT_DATE AND end_date <= CURRENT_DATE + INTERVAL '${DUE_SOON_DAYS} days'`,
         qp
       ),
       db.query(
-        `SELECT COUNT(*)::int AS count FROM Members m WHERE m.gym_id = $1${ma} AND (${MEMBER_UNPAID_SQL})`,
+        `SELECT COUNT(*)::int AS count FROM Members m WHERE m.gym_id = $1${ma}${MEMBER_LIVE_SQL} AND (${MEMBER_UNPAID_SQL})`,
         qp
       ),
       db.query(
@@ -106,7 +106,7 @@ router.get('/', async (req, res, next) => {
         `
         SELECT COUNT(*)::int AS count
         FROM Members
-        WHERE gym_id = $1${mb}
+        WHERE gym_id = $1${mb}${MEMBER_LIVE_BARE_SQL}
           AND date_trunc('month', start_date) = date_trunc('month', CURRENT_DATE)
         `,
         qp
@@ -115,7 +115,7 @@ router.get('/', async (req, res, next) => {
         `
         SELECT COUNT(*)::int AS count
         FROM Members
-        WHERE gym_id = $1${mb}
+        WHERE gym_id = $1${mb}${MEMBER_LIVE_BARE_SQL}
           AND date_trunc('month', start_date) = date_trunc('month', CURRENT_DATE - INTERVAL '1 month')
         `,
         qp
@@ -136,7 +136,7 @@ router.get('/', async (req, res, next) => {
           p.name AS plan_name
         FROM Members m
         LEFT JOIN Plans p ON p.id = m.plan_id
-        WHERE m.gym_id = $1${ma}
+        WHERE m.gym_id = $1${ma}${MEMBER_LIVE_SQL}
           AND m.end_date <= CURRENT_DATE + INTERVAL '${DUE_SOON_DAYS} days'
           AND NOT (${MEMBER_UNPAID_SQL})
         ORDER BY m.end_date ASC
@@ -160,7 +160,7 @@ router.get('/', async (req, res, next) => {
         SELECT m.id, m.name, m.end_date, m.status, m.branch_id, b.name AS branch_name
         FROM Members m
         LEFT JOIN Branches b ON b.id = m.branch_id
-        WHERE m.gym_id = $1${ma} AND (${MEMBER_UNPAID_SQL})
+        WHERE m.gym_id = $1${ma}${MEMBER_LIVE_SQL} AND (${MEMBER_UNPAID_SQL})
         ORDER BY m.name ASC
         LIMIT 10
         `,
@@ -183,7 +183,7 @@ router.get('/', async (req, res, next) => {
         FROM Members m
         LEFT JOIN Plans p ON p.id = m.plan_id
         LEFT JOIN Branches b ON b.id = m.branch_id
-        WHERE m.gym_id = $1${ma}
+        WHERE m.gym_id = $1${ma}${MEMBER_LIVE_SQL}
           AND m.end_date >= CURRENT_DATE
           AND m.end_date <= CURRENT_DATE + INTERVAL '${DUE_SOON_DAYS} days'
           AND NOT (${MEMBER_UNPAID_SQL})
@@ -209,7 +209,7 @@ router.get('/', async (req, res, next) => {
         FROM Members m
         LEFT JOIN Plans p ON p.id = m.plan_id
         LEFT JOIN Branches b ON b.id = m.branch_id
-        WHERE m.gym_id = $1${ma} AND m.end_date < CURRENT_DATE
+        WHERE m.gym_id = $1${ma}${MEMBER_LIVE_SQL} AND m.end_date < CURRENT_DATE
           AND NOT (${MEMBER_UNPAID_SQL})
         ORDER BY m.end_date ASC
         LIMIT 10

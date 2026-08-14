@@ -29,7 +29,7 @@ const BRANCH_LIST_SQL = `
     COUNT(DISTINCT m.id)::int AS member_count,
     COUNT(DISTINCT u.id) FILTER (WHERE u.is_active = true)::int AS staff_count
   FROM Branches b
-  LEFT JOIN Members m ON m.branch_id = b.id
+  LEFT JOIN Members m ON m.branch_id = b.id AND m.deleted_at IS NULL
   LEFT JOIN Users u ON u.branch_id = b.id AND u.gym_id = b.gym_id AND u.role = ANY($2::text[])
 `;
 
