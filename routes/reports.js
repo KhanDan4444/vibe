@@ -245,6 +245,8 @@ router.get('/revenue', async (req, res, next) => {
         p.method,
         p.member_id,
         m.name AS member_name,
+        m.deleted_at,
+        (${MEMBER_STATUS_EXPR}) AS status,
         b.name AS branch_name,
         pl.name AS plan_name
       FROM Payments p
