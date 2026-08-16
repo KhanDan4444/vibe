@@ -35,7 +35,10 @@ const {
   GYM_IS_UNPAID_SELECT,
   GYM_DUE_SOON_SQL,
   GYM_NEEDS_RENEWAL_SQL,
+  GYM_LIVE_SQL,
+  GYM_ARCHIVED_SQL,
   buildGymListFilters,
+  getLiveGymRow,
 } = require('../utils/gymListSql');
 const { validatePlanPaymentAmount } = require('../utils/paymentValidation');
 const { PAYMENT_SOURCES } = require('../utils/paymentSources');
@@ -76,6 +79,29 @@ const GYM_LIST_BASE = `
   LEFT JOIN Members m ON m.gym_id = g.id AND m.deleted_at IS NULL
   LEFT JOIN GymSubscriptions gs ON gs.gym_id = g.id
   LEFT JOIN SaaSPlans sp ON sp.id = gs.saas_plan_id
+  WHERE ${GYM_LIVE_SQL}
+  GROUP BY g.id, gs.saas_plan_id, gs.plan, gs.start_date, gs.end_date, sp.price, sp.duration
+`;
+
+const GYM_LIST_ARCHIVED = `
+  SELECT
+    g.*,
+    COUNT(m.id) FILTER (
+      WHERE m.end_date > CURRENT_DATE + INTERVAL '${DUE_SOON_DAYS} days'
+        AND NOT (${MEMBER_UNPAID_SQL})
+    )::int AS active_member_count,
+    gs.saas_plan_id AS saas_plan_id,
+    gs.plan AS saas_plan_name,
+    gs.start_date AS saas_start_date,
+    gs.end_date AS saas_end_date,
+    sp.price AS saas_plan_price,
+    sp.duration AS saas_plan_duration,
+    ${GYM_IS_UNPAID_SELECT}
+  FROM Gyms g
+  LEFT JOIN Members m ON m.gym_id = g.id AND m.deleted_at IS NULL
+  LEFT JOIN GymSubscriptions gs ON gs.gym_id = g.id
+  LEFT JOIN SaaSPlans sp ON sp.id = gs.saas_plan_id
+  WHERE ${GYM_ARCHIVED_SQL}
   GROUP BY g.id, gs.saas_plan_id, gs.plan, gs.start_date, gs.end_date, sp.price, sp.duration
 `;
 
@@ -121,7 +147,7 @@ router.get('/gyms', validateQuery(adminGymListQuerySchema), async (req, res, nex
       listParams
     );
 
-    const [allCount, unpaidCount, activeCount, suspendedCount, expiredCount, dueSoonCount, needsRenewalCount] =
+    const [allCount, unpaidCount, activeCount, suspendedCount, expiredCount, dueSoonCount, needsRenewalCount, archivedCount] =
       await Promise.all([
       db.query(`SELECT COUNT(*)::int AS count FROM (${GYM_LIST_BASE}) g`),
       db.query(`SELECT COUNT(*)::int AS count FROM (${GYM_LIST_BASE}) g WHERE (${GYM_UNPAID_SQL})`),
@@ -130,10 +156,12 @@ router.get('/gyms', validateQuery(adminGymListQuerySchema), async (req, res, nex
       db.query(`SELECT COUNT(*)::int AS count FROM (${GYM_LIST_BASE}) g WHERE LOWER(g.subscription_status) = 'expired'`),
       db.query(`SELECT COUNT(*)::int AS count FROM (${GYM_LIST_BASE}) g WHERE (${GYM_DUE_SOON_SQL})`),
       db.query(`SELECT COUNT(*)::int AS count FROM (${GYM_LIST_BASE}) g WHERE (${GYM_NEEDS_RENEWAL_SQL})`),
+      db.query(`SELECT COUNT(*)::int AS count FROM Gyms WHERE deleted_at IS NOT NULL`),
     ]);
 
     res.json(
       paginatedResponse(result.rows, total, page, limit, {
+        archivedTotal: archivedCount.rows[0].count,
         counts: {
           all: allCount.rows[0].count,
           unpaid: unpaidCount.rows[0].count,
@@ -145,6 +173,42 @@ router.get('/gyms', validateQuery(adminGymListQuerySchema), async (req, res, nex
         },
       })
     );
+  } catch (error) {
+    next(error);
+  }
+});
+
+/**
+ * GET /api/admin/gyms/archived
+ * Former gyms (soft-deleted). SaaS payment history is kept.
+ */
+router.get('/gyms/archived', validateQuery(adminGymListQuerySchema), async (req, res, next) => {
+  const { page, limit, offset } = parsePaginationQuery(req.query);
+
+  try {
+    const { whereExtra, params } = buildGymListFilters(req.query, 1);
+
+    const countResult = await db.query(
+      `SELECT COUNT(*)::int AS count FROM (${GYM_LIST_ARCHIVED}) g ${whereExtra}`,
+      params
+    );
+    const total = countResult.rows[0].count;
+
+    const listParams = [...params, limit, offset];
+    const limitIdx = listParams.length - 1;
+    const offsetIdx = listParams.length;
+
+    const result = await db.query(
+      `
+      SELECT * FROM (${GYM_LIST_ARCHIVED}) g
+      ${whereExtra}
+      ORDER BY g.deleted_at DESC NULLS LAST, g.name ASC
+      LIMIT $${limitIdx} OFFSET $${offsetIdx}
+      `,
+      listParams
+    );
+
+    res.json(paginatedResponse(result.rows, total, page, limit, { archivedTotal: total }));
   } catch (error) {
     next(error);
   }
@@ -381,7 +445,7 @@ router.put('/gyms/:id', validateParams(idParamSchema), validateBody(updateGymSch
           owner_name = $2,
           phone = $3,
           subscription_status = $4
-      WHERE id = $5
+      WHERE id = $5 AND deleted_at IS NULL
       RETURNING *;
     `;
     const result = await client.query(updateQuery, [
@@ -432,6 +496,10 @@ router.post(
     const { password } = req.body;
 
     try {
+      const liveGym = await getLiveGymRow(db, id);
+      if (!liveGym) {
+        return res.status(404).json({ error: 'Gym not found.' });
+      }
       const ownerResult = await db.query(
         `SELECT id, name FROM Users WHERE gym_id = $1 AND role = $2`,
         [id, ROLES.GYM_OWNER]
@@ -473,7 +541,10 @@ router.post('/gyms/:id/renew', validateParams(idParamSchema), validateBody(renew
   try {
     await client.query('BEGIN');
 
-    const gymResult = await client.query('SELECT * FROM Gyms WHERE id = $1 FOR UPDATE', [id]);
+    const gymResult = await client.query(
+      'SELECT * FROM Gyms WHERE id = $1 AND deleted_at IS NULL FOR UPDATE',
+      [id]
+    );
     if (gymResult.rows.length === 0) {
       await client.query('ROLLBACK');
       return res.status(404).json({ error: 'Gym not found.' });
@@ -600,7 +671,10 @@ router.post(
     try {
       await client.query('BEGIN');
 
-      const gymResult = await client.query('SELECT * FROM Gyms WHERE id = $1 FOR UPDATE', [id]);
+      const gymResult = await client.query(
+        'SELECT * FROM Gyms WHERE id = $1 AND deleted_at IS NULL FOR UPDATE',
+        [id]
+      );
       if (gymResult.rows.length === 0) {
         await client.query('ROLLBACK');
         return res.status(404).json({ error: 'Gym not found.' });
@@ -781,15 +855,53 @@ router.post(
  * @header {String} Authorization - Bearer token.
  * @routeparam {Number} id - Gym database ID to purge.
  */
+/**
+ * DELETE /api/admin/gyms/:id
+ * Archives a gym (soft-delete). SaaS payment history stays for reports.
+ */
 router.delete('/gyms/:id', validateParams(idParamSchema), async (req, res, next) => {
   const { id } = req.params;
 
   try {
-    const result = await db.query('DELETE FROM Gyms WHERE id = $1 RETURNING *', [id]);
+    const result = await db.query(
+      `
+      UPDATE Gyms
+      SET deleted_at = CURRENT_TIMESTAMP
+      WHERE id = $1 AND deleted_at IS NULL
+      RETURNING *
+      `,
+      [id]
+    );
     if (result.rows.length === 0) {
       return res.status(404).json({ error: 'Gym not found.' });
     }
-    res.json({ message: 'Gym and all associated tenant records successfully deleted.' });
+    res.json({ message: 'Gym removed from the directory. Payment history is kept.' });
+  } catch (error) {
+    next(error);
+  }
+});
+
+/**
+ * POST /api/admin/gyms/:id/restore
+ * Restores an archived gym to the live directory.
+ */
+router.post('/gyms/:id/restore', validateParams(idParamSchema), async (req, res, next) => {
+  const { id } = req.params;
+
+  try {
+    const result = await db.query(
+      `
+      UPDATE Gyms
+      SET deleted_at = NULL
+      WHERE id = $1 AND deleted_at IS NOT NULL
+      RETURNING *
+      `,
+      [id]
+    );
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Former gym not found.' });
+    }
+    res.json(result.rows[0]);
   } catch (error) {
     next(error);
   }
@@ -832,12 +944,12 @@ router.get('/dashboard', async (req, res, next) => {
       newGymsThisMonthRes,
       newGymsLastMonthRes,
     ] = await Promise.all([
-      db.query('SELECT COUNT(*) FROM Gyms'),
-      db.query("SELECT COUNT(*) FROM Gyms WHERE LOWER(subscription_status) = 'active'"),
-      db.query("SELECT COUNT(*) FROM Gyms WHERE LOWER(subscription_status) IN ('expired', 'suspended')"),
+      db.query('SELECT COUNT(*) FROM Gyms WHERE deleted_at IS NULL'),
+      db.query("SELECT COUNT(*) FROM Gyms WHERE deleted_at IS NULL AND LOWER(subscription_status) = 'active'"),
+      db.query("SELECT COUNT(*) FROM Gyms WHERE deleted_at IS NULL AND LOWER(subscription_status) IN ('expired', 'suspended')"),
       db.query(`
         SELECT COUNT(*)::int AS count FROM Gyms g
-        WHERE ${GYM_UNPAID_SQL}
+        WHERE ${GYM_LIVE_SQL} AND ${GYM_UNPAID_SQL}
       `),
       db.query(`
         SELECT COUNT(*)::int AS count
@@ -862,12 +974,14 @@ router.get('/dashboard', async (req, res, next) => {
       JOIN GymSubscriptions gs ON gs.gym_id = g.id
       JOIN SaaSPlans sp ON sp.id = gs.saas_plan_id
       WHERE LOWER(g.subscription_status) = 'active' AND LOWER(gs.status) = 'active'
+        AND g.deleted_at IS NULL
     `),
       db.query(`
       SELECT COUNT(*)::int AS count
       FROM Gyms g
       JOIN GymSubscriptions gs ON gs.gym_id = g.id
       WHERE LOWER(g.subscription_status) = 'active'
+        AND g.deleted_at IS NULL
         AND gs.end_date BETWEEN CURRENT_DATE AND CURRENT_DATE + INTERVAL '${DUE_SOON_DAYS} days'
     `),
       db.query(`
@@ -877,6 +991,7 @@ router.get('/dashboard', async (req, res, next) => {
       )::int AS active_members
       FROM Gyms g
       LEFT JOIN Members m ON m.gym_id = g.id AND m.deleted_at IS NULL
+      WHERE g.deleted_at IS NULL
       GROUP BY g.id, g.name
       ORDER BY active_members DESC
       LIMIT 5
@@ -894,12 +1009,14 @@ router.get('/dashboard', async (req, res, next) => {
       db.query(`
         SELECT COUNT(*)::int AS count
         FROM Gyms
-        WHERE date_trunc('month', created_at) = date_trunc('month', CURRENT_DATE)
+        WHERE deleted_at IS NULL
+          AND date_trunc('month', created_at) = date_trunc('month', CURRENT_DATE)
       `),
       db.query(`
         SELECT COUNT(*)::int AS count
         FROM Gyms
-        WHERE date_trunc('month', created_at) = date_trunc('month', CURRENT_DATE - INTERVAL '1 month')
+        WHERE deleted_at IS NULL
+          AND date_trunc('month', created_at) = date_trunc('month', CURRENT_DATE - INTERVAL '1 month')
       `),
     ]);
 
@@ -1128,7 +1245,10 @@ router.post('/payments', validateBody(adminCreatePaymentSchema), async (req, res
   try {
     await client.query('BEGIN');
 
-    const gymResult = await client.query('SELECT * FROM Gyms WHERE id = $1 FOR UPDATE', [gym_id]);
+    const gymResult = await client.query(
+      'SELECT * FROM Gyms WHERE id = $1 AND deleted_at IS NULL FOR UPDATE',
+      [gym_id]
+    );
     if (gymResult.rows.length === 0) {
       await client.query('ROLLBACK');
       return res.status(404).json({ error: 'Gym not found.' });
@@ -1381,6 +1501,7 @@ const GYM_REPORT_BASE = `
   LEFT JOIN Members m ON m.gym_id = g.id AND m.deleted_at IS NULL
   LEFT JOIN GymSubscriptions gs ON gs.gym_id = g.id
   LEFT JOIN SaaSPlans sp ON sp.id = gs.saas_plan_id
+  WHERE ${GYM_LIVE_SQL}
   GROUP BY g.id, gs.saas_plan_id, gs.plan, gs.start_date, gs.end_date, sp.price, sp.duration
 `;
 

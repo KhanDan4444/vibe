@@ -12,9 +12,14 @@ CREATE TABLE IF NOT EXISTS Gyms (
     phone VARCHAR(50),
     subscription_status VARCHAR(50) DEFAULT 'active', -- active, expired, suspended
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    deleted_at TIMESTAMPTZ,
     -- Forces system-level tenant status values to remain uniform
     CONSTRAINT check_subscription_status_lowercase CHECK (subscription_status = LOWER(subscription_status))
 );
+
+CREATE INDEX IF NOT EXISTS idx_gyms_live
+  ON Gyms (id)
+  WHERE deleted_at IS NULL;
 
 -- 2. Create Users Table (System-wide logins)
 CREATE TABLE IF NOT EXISTS Users (

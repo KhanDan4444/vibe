@@ -25,9 +25,19 @@ module.exports = async function subscriptionCheck(req, res, next) {
   }
 
   try {
-    const result = await db.query('SELECT subscription_status FROM Gyms WHERE id = $1', [gymId]);
+    const result = await db.query(
+      'SELECT subscription_status, deleted_at FROM Gyms WHERE id = $1',
+      [gymId]
+    );
     if (result.rows.length === 0) {
       return res.status(404).json({ error: 'Associated gym not found.' });
+    }
+
+    if (result.rows[0].deleted_at) {
+      return res.status(403).json({
+        error: 'This gym is no longer on the platform. Contact support.',
+        code: 'GYM_REMOVED',
+      });
     }
 
     const status = normalizeGymSubscriptionStatus(result.rows[0].subscription_status);

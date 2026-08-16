@@ -3,6 +3,10 @@
  * @description Shared SQL fragments and filters for admin gym list and report queries.
  */
 
+/** Live gym directory only — archived gyms keep SaaS payment rows for reports. */
+const GYM_LIVE_SQL = 'g.deleted_at IS NULL';
+const GYM_ARCHIVED_SQL = 'g.deleted_at IS NOT NULL';
+
 const GYM_UNPAID_SQL = `
   LOWER(g.subscription_status) = 'active'
   AND NOT EXISTS (
@@ -84,11 +88,27 @@ function buildGymListFilters(query, startParamIndex = 1) {
   return { whereExtra, params, nextIndex: idx };
 }
 
+/**
+ * @param {import('pg').Pool | import('pg').PoolClient} executor
+ * @param {number|string} gymId
+ * @returns {Promise<{ id: number } | null>}
+ */
+async function getLiveGymRow(executor, gymId) {
+  const result = await executor.query(
+    'SELECT id FROM Gyms WHERE id = $1 AND deleted_at IS NULL',
+    [gymId]
+  );
+  return result.rows[0] || null;
+}
+
 module.exports = {
+  GYM_LIVE_SQL,
+  GYM_ARCHIVED_SQL,
   GYM_UNPAID_SQL,
   GYM_IS_UNPAID_SELECT,
   GYM_DUE_SOON_SQL,
   GYM_EXPIRED_OR_SUSPENDED_SQL,
   GYM_NEEDS_RENEWAL_SQL,
   buildGymListFilters,
+  getLiveGymRow,
 };

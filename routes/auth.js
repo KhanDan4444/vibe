@@ -315,6 +315,19 @@ router.post('/login', loginLimiter, validateBody(loginSchema), async (req, res, 
       }
     }
 
+    if (user.gym_id) {
+      const gymCheck = await db.query(
+        'SELECT deleted_at FROM Gyms WHERE id = $1',
+        [user.gym_id]
+      );
+      if (!gymCheck.rows.length || gymCheck.rows[0].deleted_at) {
+        return res.status(403).json({
+          error: 'This gym is no longer on the platform. Contact support.',
+          code: 'GYM_REMOVED',
+        });
+      }
+    }
+
     const payload = buildTokenPayload(user);
 
     const token = jwt.sign(payload, process.env.JWT_SECRET, {

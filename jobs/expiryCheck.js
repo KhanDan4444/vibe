@@ -40,6 +40,7 @@ async function runGymSaasExpiryCheck() {
     WHERE gs.gym_id = g.id
       AND gs.end_date < CURRENT_DATE
       AND LOWER(g.subscription_status) = $2
+      AND g.deleted_at IS NULL
     RETURNING g.id, g.name, g.phone, gs.end_date;
   `;
   const expiredGyms = await db.query(expireQuery, [GYM_STATUS.EXPIRED, GYM_STATUS.ACTIVE]);
@@ -70,6 +71,7 @@ async function runGymSaasExpiryCheck() {
     FROM Gyms g
     JOIN GymSubscriptions gs ON gs.gym_id = g.id
     WHERE LOWER(g.subscription_status) = $1
+      AND g.deleted_at IS NULL
       AND gs.end_date = CURRENT_DATE + INTERVAL '3 days';
   `;
   const dueIn3Days = await db.query(dueIn3DaysQuery, [GYM_STATUS.ACTIVE]);
@@ -85,6 +87,7 @@ async function runGymSaasExpiryCheck() {
     FROM Gyms g
     JOIN GymSubscriptions gs ON gs.gym_id = g.id
     WHERE LOWER(g.subscription_status) = $1
+      AND g.deleted_at IS NULL
       AND gs.end_date = CURRENT_DATE;
   `;
   const today = await db.query(expiringTodayQuery, [GYM_STATUS.ACTIVE]);
