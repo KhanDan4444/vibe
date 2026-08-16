@@ -39,8 +39,9 @@ function statusWhereSql(status) {
 /**
  * @param {object} query - req.query
  * @param {number} startParamIndex - first $N index after gym_id ($1)
+ * @param {{ includeArchived?: boolean }} [options]
  */
-function buildMemberListFilters(query, startParamIndex = 2) {
+function buildMemberListFilters(query, startParamIndex = 2, options = {}) {
   const conditions = [];
   const params = [];
   let idx = startParamIndex;
@@ -70,8 +71,56 @@ function buildMemberListFilters(query, startParamIndex = 2) {
     }
   }
 
-  const whereExtra = `${MEMBER_LIVE_SQL}${conditions.length ? ` AND ${conditions.join(' AND ')}` : ''}`;
+  const liveSql = options.includeArchived ? '' : MEMBER_LIVE_SQL;
+  const whereExtra = `${liveSql}${conditions.length ? ` AND ${conditions.join(' AND ')}` : ''}`;
   return { whereExtra, params, nextIndex: idx };
+}
+
+/**
+ * Members present in [start, end]: overlapping roster dates, or a payment in range.
+ * Archived members are included when they were still on the roster (or paid) in the window.
+ * @param {{ start?: string|null, end?: string|null }} period
+ * @param {unknown[]} params
+ * @param {number} startIdx
+ */
+function appendMemberPeriodPresence(period, params, startIdx) {
+  const start = period?.start || null;
+  const end = period?.end || null;
+  if (!start && !end) {
+    return { sql: '', nextIndex: startIdx };
+  }
+
+  const parts = [];
+  let idx = startIdx;
+  const overlap = [];
+  if (end) {
+    overlap.push(`m.start_date <= $${idx}`);
+    params.push(end);
+    idx += 1;
+  }
+  if (start) {
+    overlap.push(`COALESCE(m.deleted_at::date, 'infinity'::date) >= $${idx}`);
+    params.push(start);
+    idx += 1;
+  }
+  if (overlap.length) {
+    parts.push(`(${overlap.join(' AND ')})`);
+  }
+
+  const pay = ['pay.member_id = m.id', 'pay.gym_id = m.gym_id'];
+  if (start) {
+    pay.push(`pay.date >= $${idx}`);
+    params.push(start);
+    idx += 1;
+  }
+  if (end) {
+    pay.push(`pay.date <= $${idx}`);
+    params.push(end);
+    idx += 1;
+  }
+  parts.push(`EXISTS (SELECT 1 FROM Payments pay WHERE ${pay.join(' AND ')})`);
+
+  return { sql: ` AND (${parts.join(' OR ')})`, nextIndex: idx };
 }
 
 module.exports = {
@@ -80,4 +129,5 @@ module.exports = {
   MEMBER_LIVE_SQL,
   MEMBER_LIVE_BARE_SQL,
   buildMemberListFilters,
+  appendMemberPeriodPresence,
 };

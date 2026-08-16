@@ -19,7 +19,11 @@ const {
 } = require('../utils/listSortSql');
 const { summarizePaymentRows } = require('../utils/paymentSummary');
 const { buildOwnerPaymentWhere } = require('../utils/paymentQuerySql');
-const { buildMemberListFilters, MEMBER_IS_UNPAID_SELECT } = require('../utils/memberListSql');
+const {
+  buildMemberListFilters,
+  MEMBER_IS_UNPAID_SELECT,
+  appendMemberPeriodPresence,
+} = require('../utils/memberListSql');
 const { resolveBranchScope } = require('../utils/branchScope');
 const { MEMBER_STATUS_CASE_SQL } = require('../utils/memberStatus');
 
@@ -49,6 +53,8 @@ router.get('/members', async (req, res, next) => {
   const gym_id = req.user.gym_id;
   const summaryOnly = wantsSummary(req.query);
   const memberOrderBy = parseMemberListSortOrder(req.query.sort || DEFAULT_REPORT_MEMBER_SORT);
+  const period = parsePeriodQuery(req.query);
+  const hasPeriod = Boolean(period.start || period.end);
 
   try {
     const scope = await resolveBranchScope(req);
@@ -57,8 +63,12 @@ router.get('/members', async (req, res, next) => {
     }
 
     const filterStartIdx = 2 + scope.params.length;
-    const { whereExtra, params } = buildMemberListFilters(req.query, filterStartIdx);
+    const { whereExtra, params, nextIndex } = buildMemberListFilters(req.query, filterStartIdx, {
+      includeArchived: hasPeriod,
+    });
+    const periodFrag = appendMemberPeriodPresence(period, params, nextIndex);
     const sqlParams = [gym_id, ...scope.params, ...params];
+    const periodSql = periodFrag.sql;
 
     if (summaryOnly) {
       const result = await db.query(
@@ -66,27 +76,39 @@ router.get('/members', async (req, res, next) => {
         SELECT
           COUNT(*)::int AS total,
           COUNT(*) FILTER (
-            WHERE (${MEMBER_STATUS_EXPR}) = 'active' AND NOT (${MEMBER_IS_UNPAID})
+            WHERE m.deleted_at IS NULL AND (${MEMBER_STATUS_EXPR}) = 'active' AND NOT (${MEMBER_IS_UNPAID})
           )::int AS active,
-          COUNT(*) FILTER (WHERE (${MEMBER_STATUS_EXPR}) = 'due soon')::int AS "dueSoon",
-          COUNT(*) FILTER (WHERE (${MEMBER_STATUS_EXPR}) = 'expired')::int AS expired,
-          COUNT(*) FILTER (WHERE ${MEMBER_IS_UNPAID})::int AS unpaid,
-          COUNT(*) FILTER (WHERE (${MEMBER_STATUS_EXPR}) = 'expired')::int AS "barExpired",
           COUNT(*) FILTER (
-            WHERE (${MEMBER_STATUS_EXPR}) = 'due soon'
+            WHERE m.deleted_at IS NULL AND (${MEMBER_STATUS_EXPR}) = 'due soon'
+          )::int AS "dueSoon",
+          COUNT(*) FILTER (
+            WHERE m.deleted_at IS NULL AND (${MEMBER_STATUS_EXPR}) = 'expired'
+          )::int AS expired,
+          COUNT(*) FILTER (
+            WHERE m.deleted_at IS NULL AND ${MEMBER_IS_UNPAID}
+          )::int AS unpaid,
+          COUNT(*) FILTER (WHERE m.deleted_at IS NOT NULL)::int AS former,
+          COUNT(*) FILTER (
+            WHERE m.deleted_at IS NULL AND (${MEMBER_STATUS_EXPR}) = 'expired'
+          )::int AS "barExpired",
+          COUNT(*) FILTER (
+            WHERE m.deleted_at IS NULL AND (${MEMBER_STATUS_EXPR}) = 'due soon'
           )::int AS "barDueSoon",
           COUNT(*) FILTER (
-            WHERE (${MEMBER_STATUS_EXPR}) NOT IN ('expired', 'due soon')
+            WHERE m.deleted_at IS NULL
+              AND (${MEMBER_STATUS_EXPR}) NOT IN ('expired', 'due soon')
               AND (${MEMBER_IS_UNPAID})
           )::int AS "barUnpaid",
           COUNT(*) FILTER (
-            WHERE (${MEMBER_STATUS_EXPR}) = 'active'
+            WHERE m.deleted_at IS NULL
+              AND (${MEMBER_STATUS_EXPR}) = 'active'
               AND NOT (${MEMBER_IS_UNPAID})
-          )::int AS "barActive"
+          )::int AS "barActive",
+          COUNT(*) FILTER (WHERE m.deleted_at IS NOT NULL)::int AS "barFormer"
         FROM Members m
         LEFT JOIN Plans p ON p.id = m.plan_id
         LEFT JOIN Branches b ON b.id = m.branch_id
-        WHERE m.gym_id = $1${scope.memberSql}${whereExtra}
+        WHERE m.gym_id = $1${scope.memberSql}${whereExtra}${periodSql}
         `,
         sqlParams
       );
@@ -103,6 +125,7 @@ router.get('/members', async (req, res, next) => {
           dueSoon: row.dueSoon || 0,
           expired: row.expired || 0,
           unpaid: row.unpaid || 0,
+          former: row.former || 0,
         },
         barCounts: {
           total: row.total || 0,
@@ -110,6 +133,7 @@ router.get('/members', async (req, res, next) => {
           dueSoon: row.barDueSoon || 0,
           expired: row.barExpired || 0,
           unpaid: row.barUnpaid || 0,
+          former: row.barFormer || 0,
         },
         members: [],
       });
@@ -121,7 +145,7 @@ router.get('/members', async (req, res, next) => {
       FROM Members m
       LEFT JOIN Plans p ON p.id = m.plan_id
       LEFT JOIN Branches b ON b.id = m.branch_id
-      WHERE m.gym_id = $1${scope.memberSql}${whereExtra}
+      WHERE m.gym_id = $1${scope.memberSql}${whereExtra}${periodSql}
       ORDER BY ${memberOrderBy}
       `,
       sqlParams
