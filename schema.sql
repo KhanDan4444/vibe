@@ -60,6 +60,22 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_branches_one_default_per_gym
 
 CREATE INDEX IF NOT EXISTS idx_branches_gym_id ON Branches(gym_id);
 
+CREATE TABLE IF NOT EXISTS Trainers (
+    id SERIAL PRIMARY KEY,
+    gym_id INT NOT NULL REFERENCES Gyms(id) ON DELETE CASCADE,
+    branch_id INT NOT NULL REFERENCES Branches(id) ON DELETE RESTRICT,
+    name VARCHAR(200) NOT NULL,
+    phone VARCHAR(30),
+    specialty VARCHAR(120),
+    deleted_at TIMESTAMPTZ,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_trainers_gym_live
+  ON Trainers (gym_id)
+  WHERE deleted_at IS NULL;
+
 -- 4. Create Members Table
 CREATE TABLE IF NOT EXISTS Members (
     id SERIAL PRIMARY KEY,
@@ -89,7 +105,7 @@ CREATE TABLE IF NOT EXISTS Payments (
     amount DECIMAL(10, 2) NOT NULL,
     date DATE NOT NULL DEFAULT CURRENT_DATE,
     method VARCHAR(50) DEFAULT 'Cash',
-    source VARCHAR(50) DEFAULT 'collect' CHECK (source IN ('enroll', 'collect', 'renew', 'change_plan'))
+    source VARCHAR(50) DEFAULT 'collect' CHECK (source IN ('enroll', 'collect', 'renew', 'change_plan', 'trainer'))
 );
 
 -- 6. Platform SaaS plan catalog (offered to gyms by platform admin)
@@ -167,6 +183,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS users_username_lower_unique ON Users (LOWER(us
 ALTER TABLE Users ADD COLUMN IF NOT EXISTS branch_id INT REFERENCES Branches(id) ON DELETE SET NULL;
 ALTER TABLE Members ADD COLUMN IF NOT EXISTS branch_id INT REFERENCES Branches(id) ON DELETE RESTRICT;
 ALTER TABLE Members ADD COLUMN IF NOT EXISTS photo_url VARCHAR(512);
+ALTER TABLE Members ADD COLUMN IF NOT EXISTS trainer_id INT REFERENCES Trainers(id) ON DELETE SET NULL;
 ALTER TABLE AuditLogs ADD COLUMN IF NOT EXISTS branch_id INT REFERENCES Branches(id) ON DELETE SET NULL;
 
 UPDATE Users SET is_active = true WHERE is_active IS NULL;

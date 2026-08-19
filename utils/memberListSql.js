@@ -1,25 +1,37 @@
 const { DUE_SOON_DAYS, MEMBER_STATUS, normalizeMemberStatus } = require('./memberStatus');
 
-/** Member has no payment on or after their current term start_date. */
-const MEMBER_UNPAID_SQL = `
-  NOT EXISTS (
+/** Membership payments only — trainer fees do not mark a term as paid. */
+const MEMBER_TERM_PAYMENT_EXISTS_SQL = `
+  EXISTS (
     SELECT 1 FROM Payments p
     WHERE p.member_id = m.id AND p.gym_id = m.gym_id AND p.date >= m.start_date
+      AND COALESCE(p.source, 'collect') <> 'trainer'
   )
+`;
+
+/** Member has no membership payment on or after their current term start_date. */
+const MEMBER_UNPAID_SQL = `
+  NOT ${MEMBER_TERM_PAYMENT_EXISTS_SQL}
 `;
 
 const MEMBER_IS_UNPAID_SELECT = `
   (
-    NOT EXISTS (
-      SELECT 1 FROM Payments p
-      WHERE p.member_id = m.id AND p.gym_id = m.gym_id AND p.date >= m.start_date
-    )
+    ${MEMBER_UNPAID_SQL}
   ) AS is_unpaid
 `;
 
 /** Live roster only — archived members keep payment rows for reports. */
 const MEMBER_LIVE_SQL = ' AND m.deleted_at IS NULL';
 const MEMBER_LIVE_BARE_SQL = ' AND deleted_at IS NULL';
+
+const MEMBER_LIST_FROM = `
+  FROM Members m
+  LEFT JOIN Plans p ON p.id = m.plan_id
+  LEFT JOIN Branches b ON b.id = m.branch_id
+  LEFT JOIN Trainers tr ON tr.id = m.trainer_id
+`;
+
+const MEMBER_LIST_SELECT = `m.*, p.name AS plan_name, b.name AS branch_name, tr.name AS trainer_name, ${MEMBER_IS_UNPAID_SELECT}`;
 
 function statusWhereSql(status) {
   const normalized = normalizeMemberStatus(status);
@@ -128,6 +140,8 @@ module.exports = {
   MEMBER_IS_UNPAID_SELECT,
   MEMBER_LIVE_SQL,
   MEMBER_LIVE_BARE_SQL,
+  MEMBER_LIST_FROM,
+  MEMBER_LIST_SELECT,
   buildMemberListFilters,
   appendMemberPeriodPresence,
 };

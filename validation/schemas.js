@@ -118,6 +118,10 @@ const enrollMemberSchema = z
     skip_payment: z.boolean().optional(),
     branch_id: positiveInt.optional(),
     photo: z.string().max(3_000_000).optional(),
+    trainer_id: positiveInt.optional(),
+    trainer_fee: z.coerce.number().min(0).optional(),
+    trainer_fee_date: optionalDate,
+    trainer_fee_method: paymentMethod,
   })
   .superRefine((data, ctx) => {
     refineEnrollMemberPayment(data, ctx);
@@ -151,14 +155,36 @@ const transferMemberSchema = z.object({
   branch_id: positiveInt,
 });
 
+const createTrainerSchema = z.object({
+  name: trimmed(200),
+  phone: optionalEthiopianPhone,
+  specialty: optionalTrimmed(120),
+  branch_id: positiveInt,
+});
+
+const updateTrainerSchema = z
+  .object({
+    name: trimmed(200).optional(),
+    phone: optionalEthiopianPhone,
+    specialty: optionalTrimmed(120),
+    branch_id: optionalPositiveInt,
+  })
+  .refine((data) => Object.values(data).some((value) => value !== undefined), {
+    message: 'At least one field is required.',
+  });
+
 const updateMemberSchema = z.object({
   name: trimmed(200).optional(),
   phone: optionalEthiopianPhone,
   plan_id: optionalPositiveInt,
   start_date: optionalDate,
   branch_id: optionalPositiveInt,
-  photo: z.union([z.string().max(3_000_000), z.null()]).optional(),
-});
+    photo: z.union([z.string().max(3_000_000), z.null()]).optional(),
+    trainer_id: z.union([positiveInt, z.null()]).optional(),
+    trainer_fee: z.coerce.number().min(0).optional(),
+    trainer_fee_date: optionalDate,
+    trainer_fee_method: paymentMethod,
+  });
 
 const createPaymentSchema = z
   .object({
@@ -417,6 +443,8 @@ module.exports = {
   renewMemberSchema,
   changeMemberPlanSchema,
   transferMemberSchema,
+  createTrainerSchema,
+  updateTrainerSchema,
   updateMemberSchema,
   createPaymentSchema,
   updatePaymentSchema,

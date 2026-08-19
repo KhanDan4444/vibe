@@ -20,7 +20,7 @@ const { todayLocalString } = require('../utils/localDate');
 const { deriveMemberStatusFromEndDate, normalizeMemberStatus, MEMBER_STATUS } = require('../utils/memberStatus');
 const { parsePaginationQuery, paginatedResponse } = require('../utils/pagination');
 const { parseMemberListSortOrder } = require('../utils/listSortSql');
-const { buildMemberListFilters, MEMBER_IS_UNPAID_SELECT, MEMBER_LIVE_BARE_SQL } = require('../utils/memberListSql');
+const { buildMemberListFilters, MEMBER_IS_UNPAID_SELECT, MEMBER_LIVE_BARE_SQL, MEMBER_LIST_FROM, MEMBER_LIST_SELECT } = require('../utils/memberListSql');
 const { validateBody, validateParams, validateQuery } = require('../middleware/validate');
 const { memberListQuerySchema } = require('../validation/querySchemas');
 const {
@@ -34,7 +34,8 @@ const {
 } = require('../validation/schemas');
 const { ACTIONS, recordAuditLog } = require('../utils/auditLog');
 const { resolveBranchScope, gymBranchParams } = require('../utils/branchScope');
-const { resolveMemberBranchId, assertMemberBranchWritable, assertBranchInGym } = require('../utils/branches');
+const { assertBranchInGym, resolveMemberBranchId } = require('../utils/branches');
+const { assignTrainerToMember } = require('../utils/trainers');
 const {
   queryMemberPaidForCurrentTerm,
   queryHasPaidTermStartingOn,
@@ -129,7 +130,7 @@ router.post('/', requireActiveSubscription, validateBody(createMemberSchema), as
  * @bodyparam {Boolean} [skip_payment] - If true, member is created without a payment record.
  */
 router.post('/enroll', requireActiveSubscription, validateBody(enrollMemberSchema), async (req, res, next) => {
-  const { name, phone, plan_id, start_date, amount, date, method, skip_payment, branch_id: bodyBranchId, photo } = req.body;
+  const { name, phone, plan_id, start_date, amount, date, method, skip_payment, branch_id: bodyBranchId, photo, trainer_id, trainer_fee, trainer_fee_date, trainer_fee_method } = req.body;
   const gym_id = req.user.gym_id;
 
   const photoCheck = parsePhotoDataUrl(photo);
@@ -205,6 +206,25 @@ router.post('/enroll', requireActiveSubscription, validateBody(enrollMemberSchem
       member = photoUpdate.rows[0];
     }
 
+    let trainerPayment = null;
+    if (trainer_id) {
+      const assigned = await assignTrainerToMember(client, {
+        gymId: gym_id,
+        memberId: member.id,
+        trainerId: trainer_id,
+        trainerFee: trainer_fee,
+        feeDate: trainer_fee_date || date || todayLocalString(),
+        feeMethod: trainer_fee_method || method || 'Cash',
+      });
+      trainerPayment = assigned.payment;
+    }
+
+    const packed = await client.query(
+      `SELECT ${MEMBER_LIST_SELECT} ${MEMBER_LIST_FROM} WHERE m.id = $1 AND m.gym_id = $2`,
+      [member.id, gym_id]
+    );
+    member = packed.rows[0] || member;
+
     await recordAuditLog({
       req,
       client,
@@ -233,7 +253,7 @@ router.post('/enroll', requireActiveSubscription, validateBody(enrollMemberSchem
       )
       .catch((err) => console.error('[SMS] Member enrollment confirmation failed:', err.message));
 
-    res.status(201).json({ member, payment });
+    res.status(201).json({ member, payment, trainer_payment: trainerPayment });
   } catch (error) {
     await client.query('ROLLBACK');
     next(error);
@@ -291,10 +311,8 @@ router.get('/', validateQuery(memberListQuerySchema), async (req, res, next) => 
 
     const result = await db.query(
       `
-      SELECT m.*, p.name AS plan_name, b.name AS branch_name, ${MEMBER_IS_UNPAID_SELECT}
-      FROM Members m
-      LEFT JOIN Plans p ON p.id = m.plan_id
-      LEFT JOIN Branches b ON b.id = m.branch_id
+      SELECT ${MEMBER_LIST_SELECT}
+      ${MEMBER_LIST_FROM}
       WHERE m.gym_id = $1${scope.memberSql}${whereExtra}
       ORDER BY ${memberOrderBy}
       LIMIT $${limitIdx} OFFSET $${offsetIdx}
@@ -348,10 +366,8 @@ router.get('/archived', validateQuery(memberListQuerySchema), async (req, res, n
     const pagedParams = [...params, limit, offset];
     const result = await db.query(
       `
-      SELECT m.*, p.name AS plan_name, b.name AS branch_name, ${MEMBER_IS_UNPAID_SELECT}
-      FROM Members m
-      LEFT JOIN Plans p ON p.id = m.plan_id
-      LEFT JOIN Branches b ON b.id = m.branch_id
+      SELECT ${MEMBER_LIST_SELECT}
+      ${MEMBER_LIST_FROM}
       ${whereSql}
       ORDER BY m.deleted_at DESC, m.name ASC
       LIMIT $${pagedParams.length - 1} OFFSET $${pagedParams.length}
@@ -449,10 +465,8 @@ router.get('/:id', validateParams(idParamSchema), async (req, res, next) => {
 
     const result = await db.query(
       `
-      SELECT m.*, p.name AS plan_name, b.name AS branch_name, ${MEMBER_IS_UNPAID_SELECT}
-      FROM Members m
-      LEFT JOIN Plans p ON p.id = m.plan_id
-      LEFT JOIN Branches b ON b.id = m.branch_id
+      SELECT ${MEMBER_LIST_SELECT}
+      ${MEMBER_LIST_FROM}
       WHERE m.id = $1 AND m.gym_id = $2${access.aliasSql}
       `,
       [id, gym_id, ...access.params]
@@ -872,11 +886,8 @@ router.post(
 
       const updated = await db.query(
         `
-        SELECT m.*, b.name AS branch_name, p.name AS plan_name,
-          ${MEMBER_IS_UNPAID_SELECT}
-        FROM Members m
-        LEFT JOIN Branches b ON b.id = m.branch_id
-        LEFT JOIN Plans p ON p.id = m.plan_id
+        SELECT ${MEMBER_LIST_SELECT}
+        ${MEMBER_LIST_FROM}
         WHERE m.id = $1
         `,
         [id]
@@ -904,7 +915,7 @@ router.post(
  */
 router.put('/:id', requireActiveSubscription, validateParams(idParamSchema), validateBody(updateMemberSchema), async (req, res, next) => {
   const { id } = req.params;
-  const { name, phone, plan_id, start_date, branch_id, photo } = req.body;
+  const { name, phone, plan_id, start_date, branch_id, photo, trainer_id, trainer_fee, trainer_fee_date, trainer_fee_method } = req.body;
   const gym_id = req.user.gym_id;
   const { isGymOwner } = require('../utils/roles');
 
@@ -979,12 +990,22 @@ router.put('/:id', requireActiveSubscription, validateParams(idParamSchema), val
     ]);
 
     const updated = result.rows[0];
+
+    if (trainer_id !== undefined) {
+      await assignTrainerToMember(db, {
+        gymId: gym_id,
+        memberId: parseInt(id, 10),
+        trainerId: trainer_id,
+        trainerFee: trainer_id == null ? 0 : trainer_fee,
+        feeDate: trainer_fee_date || todayLocalString(),
+        feeMethod: trainer_fee_method || 'Cash',
+      });
+    }
+
     const enriched = await db.query(
       `
-      SELECT m.*, p.name AS plan_name, b.name AS branch_name, ${MEMBER_IS_UNPAID_SELECT}
-      FROM Members m
-      LEFT JOIN Plans p ON p.id = m.plan_id
-      LEFT JOIN Branches b ON b.id = m.branch_id
+      SELECT ${MEMBER_LIST_SELECT}
+      ${MEMBER_LIST_FROM}
       WHERE m.id = $1 AND m.gym_id = $2
       `,
       [id, gym_id]
@@ -1088,10 +1109,8 @@ router.post(
       const restored = result.rows[0];
       const enriched = await db.query(
         `
-        SELECT m.*, p.name AS plan_name, b.name AS branch_name, ${MEMBER_IS_UNPAID_SELECT}
-        FROM Members m
-        LEFT JOIN Plans p ON p.id = m.plan_id
-        LEFT JOIN Branches b ON b.id = m.branch_id
+        SELECT ${MEMBER_LIST_SELECT}
+        ${MEMBER_LIST_FROM}
         WHERE m.id = $1 AND m.gym_id = $2
         `,
         [id, gym_id]

@@ -22,6 +22,10 @@ const ACTIONS = Object.freeze({
   PLAN_DELETED: 'plan.deleted',
   STAFF_CREATED: 'staff.created',
   STAFF_UPDATED: 'staff.updated',
+  TRAINER_CREATED: 'trainer.created',
+  TRAINER_UPDATED: 'trainer.updated',
+  TRAINER_DELETED: 'trainer.deleted',
+  TRAINER_RESTORED: 'trainer.restored',
 });
 
 /**

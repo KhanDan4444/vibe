@@ -48,6 +48,7 @@ async function queryMemberPaidForCurrentTerm(dbOrClient, memberId, gymId) {
       SELECT 1 FROM Payments p
       JOIN Members m ON m.id = p.member_id AND m.gym_id = p.gym_id
       WHERE m.id = $1 AND m.gym_id = $2 AND p.date >= m.start_date
+        AND COALESCE(p.source, 'collect') <> 'trainer'
     ) AS ok
     `,
     [memberId, gymId]
@@ -63,6 +64,7 @@ async function queryHasPaymentForTermStart(dbOrClient, memberId, gymId, termStar
     SELECT EXISTS (
       SELECT 1 FROM Payments
       WHERE member_id = $1 AND gym_id = $2 AND date >= $3::date
+        AND COALESCE(source, 'collect') <> 'trainer'
     ) AS ok
     `,
     [memberId, gymId, termStart]
@@ -114,6 +116,7 @@ async function queryHasPaidTermStartingOn(dbOrClient, memberId, gymId, termStart
         AND EXISTS (
           SELECT 1 FROM Payments p
           WHERE p.member_id = m.id AND p.gym_id = m.gym_id AND p.date >= m.start_date
+            AND COALESCE(p.source, 'collect') <> 'trainer'
         )
     ) AS ok
     `,
