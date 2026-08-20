@@ -26,6 +26,8 @@ const ACTIONS = Object.freeze({
   TRAINER_UPDATED: 'trainer.updated',
   TRAINER_DELETED: 'trainer.deleted',
   TRAINER_RESTORED: 'trainer.restored',
+  CHECK_IN_RECORDED: 'check_in.recorded',
+  ATTENDANCE_SETTINGS_UPDATED: 'attendance.settings_updated',
 });
 
 /**

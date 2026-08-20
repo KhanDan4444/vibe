@@ -115,6 +115,7 @@ app.use('/api/gym/profile', gymProfileRoutes);
 app.use('/api/gym/subscription', gymSubscriptionRoutes);
 app.use('/api/gym/team', gymTeamRoutes);
 app.use('/api/gym/trainers', require('./routes/gymTrainers'));
+app.use('/api/check-ins', require('./routes/checkIns'));
 app.use('/api/gym/activity', auditLogRoutes);
 app.use('/api/gym/member-sms', memberSmsRoutes);
 app.use('/api/gym/branches', branchRoutes);

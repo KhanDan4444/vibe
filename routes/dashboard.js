@@ -64,6 +64,7 @@ router.get('/', async (req, res, next) => {
       dueSoonAlertsRes,
       expiredAlertsRes,
       recentPaymentsRes,
+      checkedInTodayRes,
     ] = await Promise.all([
       db.query(`SELECT COUNT(*)::int AS count FROM Members WHERE gym_id = $1${mb}${MEMBER_LIVE_BARE_SQL}`, qp),
       db.query(
@@ -228,6 +229,16 @@ router.get('/', async (req, res, next) => {
         `,
         qp
       ),
+      db.query(
+        `
+        SELECT COUNT(*)::int AS count
+        FROM CheckIns c
+        WHERE c.gym_id = $1
+          AND c.checked_in_at::date = CURRENT_DATE
+          ${scope.branchId ? ' AND c.branch_id = $2' : ''}
+        `,
+        qp
+      ),
     ]);
 
     const notifications = [];
@@ -313,6 +324,7 @@ router.get('/', async (req, res, next) => {
       expiredMembers: expiredMembersRes.rows[0].count,
       dueSoonMembers: dueSoonMembersRes.rows[0].count,
       unpaidCount: unpaidRes.rows[0].count,
+      checkedInToday: checkedInTodayRes.rows[0].count,
       monthlyIncome,
       previousMonthIncome,
       revenueTrendPercent: computePercentChange(monthlyIncome, previousMonthIncome),
