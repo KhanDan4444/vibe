@@ -82,6 +82,7 @@ async function visitSummaryForMember(member, gymId, settings) {
     visits_limit: settings.visits_per_week,
     week_start: toDateString(weekStart),
     week_end: toDateString(new Date(weekEnd.getTime() - 1)),
+    week_starts_on: settings.week_starts_on,
     one_checkin_per_day: settings.one_checkin_per_day,
     over_limit_policy: settings.over_limit_policy,
   };
