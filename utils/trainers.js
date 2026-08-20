@@ -15,6 +15,7 @@ function mapTrainerRow(row) {
     branch_name: row.branch_name || null,
     deleted_at: row.deleted_at || null,
     created_at: row.created_at || null,
+    member_count: Number(row.member_count) || 0,
   };
 }
 

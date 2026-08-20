@@ -27,7 +27,11 @@ const listQuerySchema = z.object({
 });
 
 const TRAINER_SELECT = `
-  SELECT t.id, t.name, t.phone, t.specialty, t.branch_id, t.deleted_at, t.created_at, b.name AS branch_name
+  SELECT t.id, t.name, t.phone, t.specialty, t.branch_id, t.deleted_at, t.created_at, b.name AS branch_name,
+    (
+      SELECT COUNT(*)::int FROM Members m
+      WHERE m.trainer_id = t.id AND m.gym_id = t.gym_id AND m.deleted_at IS NULL
+    ) AS member_count
   FROM Trainers t
   LEFT JOIN Branches b ON b.id = t.branch_id
 `;
@@ -91,7 +95,7 @@ router.post(
         details: { branch_id: branchId, phone: row.phone, specialty: row.specialty },
       });
       res.status(201).json({
-        trainer: mapTrainerRow({ ...row, branch_name: branchRow.rows[0]?.name }),
+        trainer: mapTrainerRow({ ...row, branch_name: branchRow.rows[0]?.name, member_count: 0 }),
       });
     } catch (error) {
       next(error);
