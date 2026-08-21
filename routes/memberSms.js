@@ -21,6 +21,7 @@ const MEMBER_SMS_TYPES = [
   'member_expired',
   'member_renewed',
   'member_enrolled',
+  'member_pass_link',
 ];
 
 router.use(auth, checkSubscription, requireGymAccess, requireGymOwner);

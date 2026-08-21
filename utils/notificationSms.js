@@ -16,6 +16,7 @@ const SMS_TYPES = Object.freeze({
   MEMBER_EXPIRED: 'member_expired',
   MEMBER_RENEWED: 'member_renewed',
   MEMBER_ENROLLED: 'member_enrolled',
+  MEMBER_PASS_LINK: 'member_pass_link',
   GYM_LICENSE_DUE_SOON: 'gym_license_due_soon',
   GYM_LICENSE_DUE_IN_3_DAYS: 'gym_license_due_in_3_days',
   GYM_LICENSE_EXPIRES_TODAY: 'gym_license_expires_today',
@@ -97,7 +98,7 @@ async function linkSignupOtpToGym(gymId, phone) {
   );
 }
 
-async function deliverSms({ to, message, messageType, entityType, entityId }) {
+async function deliverSms({ to, message, messageType, entityType, entityId, skipDailyDedupe = false }) {
   const phone = normalizeEthiopianPhone(to);
   if (!phone) {
     console.warn(
@@ -106,7 +107,11 @@ async function deliverSms({ to, message, messageType, entityType, entityId }) {
     return false;
   }
 
-  if (entityId != null && (await wasSmsSentToday(messageType, entityType, entityId))) {
+  if (
+    !skipDailyDedupe &&
+    entityId != null &&
+    (await wasSmsSentToday(messageType, entityType, entityId))
+  ) {
     return false;
   }
 
@@ -214,6 +219,25 @@ async function smsMemberEnrolled(member, gymName, term = {}) {
   });
 }
 
+/**
+ * Send a link to the member’s public QR pass page (not the image).
+ * @param {{ id: number, name: string, phone?: string }} member
+ * @param {string} gymName
+ * @param {string} passUrl
+ */
+async function smsMemberPassLink(member, gymName, passUrl) {
+  if (!member.phone) return false;
+  const message = `Hi ${member.name}, your ${gymName} check-in pass: ${passUrl} Open the link and show the QR at the desk.`;
+  return deliverSms({
+    to: member.phone,
+    message,
+    messageType: SMS_TYPES.MEMBER_PASS_LINK,
+    entityType: 'member',
+    entityId: member.id,
+    skipDailyDedupe: true,
+  });
+}
+
 async function smsGymLicenseDueIn3Days(gym, endDate, planName) {
   const contact = await getGymOwnerContact(gym.id);
   const phone = contact?.phone || gym.phone;
@@ -285,6 +309,7 @@ module.exports = {
   smsMemberExpired,
   smsMemberRenewed,
   smsMemberEnrolled,
+  smsMemberPassLink,
   smsGymLicenseDueIn3Days,
   smsGymLicenseExpiresToday,
   smsGymLicenseExpired,

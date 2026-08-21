@@ -95,9 +95,22 @@ function resolveMemberPhotoOnDisk(photoUrl) {
   return { absolute, mime };
 }
 
+/** Data URL for embedding photos in public pass / print payloads. */
+function memberPhotoToDataUrl(photoUrl) {
+  const file = resolveMemberPhotoOnDisk(photoUrl);
+  if (!file) return null;
+  try {
+    const buf = fs.readFileSync(file.absolute);
+    return `data:${file.mime};base64,${buf.toString('base64')}`;
+  } catch {
+    return null;
+  }
+}
+
 module.exports = {
   parsePhotoDataUrl,
   saveMemberPhoto,
   removeMemberPhotoFiles,
   resolveMemberPhotoOnDisk,
+  memberPhotoToDataUrl,
 };

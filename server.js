@@ -119,6 +119,7 @@ app.use('/api/check-ins', require('./routes/checkIns'));
 app.use('/api/gym/activity', auditLogRoutes);
 app.use('/api/gym/member-sms', memberSmsRoutes);
 app.use('/api/gym/branches', branchRoutes);
+app.use('/api/public', require('./routes/publicMemberPass'));
 app.use('/api/admin', adminRoutes);
 app.use('/api/admin/saas-plans', adminSaasPlanRoutes);
 

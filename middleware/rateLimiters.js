@@ -84,6 +84,13 @@ const apiLimiter = createLimiter({
   message: 'Too many requests. Please slow down.',
 });
 
+/** Public member pass page — 60 per IP per 15 minutes (prod). */
+const publicMemberPassLimiter = createLimiter({
+  windowMs: 15 * 60 * 1000,
+  max: process.env.NODE_ENV === 'production' ? 60 : 300,
+  message: 'Too many pass requests. Please try again later.',
+});
+
 module.exports = {
   loginLimiter,
   registerAdminLimiter,
@@ -92,6 +99,7 @@ module.exports = {
   otpRequestLimiter,
   otpVerifyLimiter,
   publicGymSignupLimiter,
+  publicMemberPassLimiter,
   resetPasswordLimiter,
   changePasswordLimiter,
   apiLimiter,

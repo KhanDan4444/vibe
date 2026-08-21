@@ -28,6 +28,8 @@ const ACTIONS = Object.freeze({
   TRAINER_RESTORED: 'trainer.restored',
   CHECK_IN_RECORDED: 'check_in.recorded',
   ATTENDANCE_SETTINGS_UPDATED: 'attendance.settings_updated',
+  MEMBER_PASS_REGENERATED: 'member.pass_regenerated',
+  MEMBER_PASS_SMS_SENT: 'member.pass_sms_sent',
 });
 
 /**

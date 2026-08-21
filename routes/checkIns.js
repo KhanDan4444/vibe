@@ -1,6 +1,6 @@
 /**
  * @file routes/checkIns.js
- * @description Desk check-in — search + tap. Phase 2 (no QR yet).
+ * @description Desk check-in — search + tap + member QR scan (Phase 3).
  */
 
 const express = require('express');
@@ -26,14 +26,20 @@ const {
   mapCheckInRow,
 } = require('../utils/checkIns');
 const { isGymOwner } = require('../utils/roles');
+const { verifyMemberPass, passFingerprint } = require('../utils/memberPass');
 
 router.use(auth, requireGymAccess, checkSubscription);
 
-const createCheckInSchema = z.object({
-  member_id: z.coerce.number().int().positive(),
-  force: z.boolean().optional().default(false),
-  notes: z.string().trim().max(500).optional(),
-});
+const createCheckInSchema = z
+  .object({
+    member_id: z.coerce.number().int().positive().optional(),
+    member_pass_token: z.string().trim().min(20).max(2000).optional(),
+    force: z.boolean().optional().default(false),
+    notes: z.string().trim().max(500).optional(),
+  })
+  .refine((body) => Boolean(body.member_id) !== Boolean(body.member_pass_token), {
+    message: 'Provide exactly one of member_id or member_pass_token.',
+  });
 
 const listQuerySchema = z.object({
   date: z
@@ -274,7 +280,7 @@ router.get('/', validateQuery(listQuerySchema), async (req, res, next) => {
   }
 });
 
-/** POST /api/check-ins */
+/** POST /api/check-ins — by member_id (search) or member_pass_token (QR scan) */
 router.post(
   '/',
   requireActiveSubscription,
@@ -286,7 +292,44 @@ router.post(
         return res.status(400).json({ error: scope.error });
       }
 
-      const member = await loadLiveMember(req.user.gym_id, req.body.member_id, scope);
+      let method = 'search';
+      let memberId = req.body.member_id || null;
+
+      if (req.body.member_pass_token) {
+        method = 'member_qr';
+        const verified = verifyMemberPass(req.body.member_pass_token);
+        if (!verified.ok) {
+          return res.status(400).json({ error: verified.error, code: verified.code });
+        }
+        if (verified.gymId !== req.user.gym_id) {
+          return res.status(400).json({
+            error: 'This pass belongs to another gym.',
+            code: 'PASS_WRONG_GYM',
+          });
+        }
+
+        const passRow = await db.query(
+          `
+          SELECT id, pass_version, deleted_at
+          FROM Members
+          WHERE id = $1 AND gym_id = $2
+          `,
+          [verified.memberId, req.user.gym_id]
+        );
+        const passMember = passRow.rows[0];
+        if (!passMember || passMember.deleted_at) {
+          return res.status(404).json({ error: 'Member not found.', code: 'PASS_MEMBER_MISSING' });
+        }
+        if (Number(passMember.pass_version) !== Number(verified.passVersion)) {
+          return res.status(400).json({
+            error: 'This QR was regenerated. Ask for the new pass.',
+            code: 'PASS_STALE',
+          });
+        }
+        memberId = passMember.id;
+      }
+
+      const member = await loadLiveMember(req.user.gym_id, memberId, scope);
       if (!member) {
         return res.status(404).json({ error: 'Member not found.' });
       }
@@ -307,13 +350,15 @@ router.post(
           week_start: eligibility.weekStart,
           week_end: eligibility.weekEnd,
           can_force: Boolean(eligibility.canForce),
+          member_id: member.id,
+          member_name: member.name,
         });
       }
 
       const insert = await db.query(
         `
         INSERT INTO CheckIns (gym_id, branch_id, member_id, checked_in_by_user_id, method, notes)
-        VALUES ($1, $2, $3, $4, 'search', $5)
+        VALUES ($1, $2, $3, $4, $5, $6)
         RETURNING *
         `,
         [
@@ -321,6 +366,7 @@ router.post(
           member.branch_id,
           member.id,
           req.user.id,
+          method,
           req.body.notes || null,
         ]
       );
@@ -336,7 +382,10 @@ router.post(
           member_id: member.id,
           visits_this_week: visitsThisWeek,
           visits_limit: eligibility.visitsLimit,
-          method: 'search',
+          method,
+          ...(method === 'member_qr'
+            ? { pass_fp: passFingerprint(req.body.member_pass_token) }
+            : {}),
         },
       });
 

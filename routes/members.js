@@ -36,6 +36,8 @@ const { ACTIONS, recordAuditLog } = require('../utils/auditLog');
 const { resolveBranchScope, gymBranchParams } = require('../utils/branchScope');
 const { assertBranchInGym, resolveMemberBranchId } = require('../utils/branches');
 const { assignTrainerToMember } = require('../utils/trainers');
+const { signMemberPass } = require('../utils/memberPass');
+const QRCode = require('qrcode');
 const {
   queryMemberPaidForCurrentTerm,
   queryHasPaidTermStartingOn,
@@ -50,7 +52,9 @@ const {
   saveMemberPhoto,
   removeMemberPhotoFiles,
   resolveMemberPhotoOnDisk,
+  memberPhotoToDataUrl,
 } = require('../utils/memberPhotos');
+const { smsMemberPassLink, isSmsConfigured } = require('../utils/notificationSms');
 const { PAYMENT_SOURCES } = require('../utils/paymentSources');
 const { getGymOwnerContact, smsMemberRenewed, smsMemberEnrolled } = require('../utils/notificationSms');
 
@@ -414,6 +418,215 @@ router.get('/:id/photo', validateParams(idParamSchema), async (req, res, next) =
     next(error);
   }
 });
+
+/**
+ * GET /api/members/:id/pass
+ * Signed member QR payload + PNG data URL for desk / profile display.
+ */
+router.get('/:id/pass', validateParams(idParamSchema), async (req, res, next) => {
+  const gymId = req.user.gym_id;
+  const { id } = req.params;
+
+  try {
+    const access = await memberBranchClause(req);
+    if (access.error) {
+      return res.status(400).json({ error: access.error });
+    }
+
+    const result = await db.query(
+      `
+      SELECT m.id, m.name, m.phone, m.photo_url, m.pass_version, m.deleted_at,
+             m.branch_id, b.name AS branch_name, g.name AS gym_name
+      FROM Members m
+      LEFT JOIN Branches b ON b.id = m.branch_id
+      LEFT JOIN Gyms g ON g.id = m.gym_id
+      WHERE m.id = $1 AND m.gym_id = $2${access.sql ? ' AND m.branch_id = $3' : ''}
+      `,
+      [id, gymId, ...access.params]
+    );
+    const member = result.rows[0];
+    if (!member || member.deleted_at) {
+      return res.status(404).json({ error: 'Member not found.' });
+    }
+
+    const passVersion = Number(member.pass_version) || 1;
+    const token = signMemberPass({
+      gymId,
+      memberId: member.id,
+      passVersion,
+    });
+    const qr_data_url = await QRCode.toDataURL(token, {
+      errorCorrectionLevel: 'M',
+      margin: 1,
+      width: 280,
+      color: { dark: '#0f172a', light: '#ffffff' },
+    });
+
+    res.json({
+      token,
+      pass_version: passVersion,
+      qr_data_url,
+      gym_name: member.gym_name || null,
+      member: {
+        id: member.id,
+        name: member.name,
+        phone: member.phone,
+        photo_url: member.photo_url || null,
+        photo_data_url: memberPhotoToDataUrl(member.photo_url),
+        branch_id: member.branch_id,
+        branch_name: member.branch_name || null,
+      },
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+/**
+ * POST /api/members/:id/pass/regenerate
+ * Owner-only: bump pass_version so prior QR codes stop working.
+ */
+router.post(
+  '/:id/pass/regenerate',
+  requireGymOwner,
+  requireActiveSubscription,
+  validateParams(idParamSchema),
+  async (req, res, next) => {
+    const gymId = req.user.gym_id;
+    const { id } = req.params;
+
+    try {
+      const access = await memberBranchClause(req);
+      if (access.error) {
+        return res.status(400).json({ error: access.error });
+      }
+
+      const result = await db.query(
+        `
+        UPDATE Members
+        SET pass_version = COALESCE(pass_version, 1) + 1
+        WHERE id = $1 AND gym_id = $2 AND deleted_at IS NULL${access.sql}
+        RETURNING id, name, phone, photo_url, pass_version, branch_id
+        `,
+        [id, gymId, ...access.params]
+      );
+      const member = result.rows[0];
+      if (!member) {
+        return res.status(404).json({ error: 'Member not found.' });
+      }
+
+      const passVersion = Number(member.pass_version) || 1;
+      const token = signMemberPass({
+        gymId,
+        memberId: member.id,
+        passVersion,
+      });
+      const qr_data_url = await QRCode.toDataURL(token, {
+        errorCorrectionLevel: 'M',
+        margin: 1,
+        width: 280,
+        color: { dark: '#0f172a', light: '#ffffff' },
+      });
+
+      await recordAuditLog({
+        req,
+        action: ACTIONS.MEMBER_PASS_REGENERATED,
+        entityType: 'member',
+        entityId: member.id,
+        entityLabel: member.name,
+        details: { pass_version: passVersion },
+      });
+
+      res.json({
+        token,
+        pass_version: passVersion,
+        qr_data_url,
+        member: {
+          id: member.id,
+          name: member.name,
+          phone: member.phone,
+          photo_url: member.photo_url || null,
+          branch_id: member.branch_id,
+        },
+      });
+    } catch (error) {
+      next(error);
+    }
+  }
+);
+
+/**
+ * POST /api/members/:id/pass/sms
+ * Staff: SMS a link to the public pass page (not the QR image).
+ */
+router.post(
+  '/:id/pass/sms',
+  requireActiveSubscription,
+  validateParams(idParamSchema),
+  async (req, res, next) => {
+    const gymId = req.user.gym_id;
+    const { id } = req.params;
+
+    try {
+      if (!isSmsConfigured()) {
+        return res.status(503).json({ error: 'SMS is not configured on this server.' });
+      }
+
+      const access = await memberBranchClause(req);
+      if (access.error) {
+        return res.status(400).json({ error: access.error });
+      }
+
+      const result = await db.query(
+        `
+        SELECT m.id, m.name, m.phone, m.pass_version, m.deleted_at, g.name AS gym_name
+        FROM Members m
+        JOIN Gyms g ON g.id = m.gym_id
+        WHERE m.id = $1 AND m.gym_id = $2${access.sql}
+        `,
+        [id, gymId, ...access.params]
+      );
+      const member = result.rows[0];
+      if (!member || member.deleted_at) {
+        return res.status(404).json({ error: 'Member not found.' });
+      }
+      if (!member.phone) {
+        return res.status(400).json({ error: 'This member has no phone number.' });
+      }
+
+      const passVersion = Number(member.pass_version) || 1;
+      const token = signMemberPass({
+        gymId,
+        memberId: member.id,
+        passVersion,
+      });
+      const frontendBase = (process.env.FRONTEND_URL || 'http://localhost:5173').replace(/\/$/, '');
+      const passUrl = `${frontendBase}/pass?t=${encodeURIComponent(token)}`;
+
+      const sent = await smsMemberPassLink(
+        { id: member.id, name: member.name, phone: member.phone },
+        member.gym_name || 'your gym',
+        passUrl
+      );
+      if (!sent) {
+        return res.status(502).json({ error: 'Could not send the pass SMS. Try again.' });
+      }
+
+      await recordAuditLog({
+        req,
+        action: ACTIONS.MEMBER_PASS_SMS_SENT,
+        entityType: 'member',
+        entityId: member.id,
+        entityLabel: member.name,
+        details: { pass_version: passVersion },
+      });
+
+      res.json({ ok: true, phone: member.phone });
+    } catch (error) {
+      next(error);
+    }
+  }
+);
 
 /**
  * GET /api/members/:id/payments

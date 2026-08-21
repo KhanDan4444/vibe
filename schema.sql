@@ -89,6 +89,7 @@ CREATE TABLE IF NOT EXISTS Members (
     status VARCHAR(50) DEFAULT 'active', -- active, expired, due soon
     photo_url VARCHAR(512),
     deleted_at TIMESTAMPTZ,
+    pass_version INT NOT NULL DEFAULT 1,
     -- Forces client-level member tracking records to remain uniform
     CONSTRAINT check_member_status_lowercase CHECK (status = LOWER(status))
 );
