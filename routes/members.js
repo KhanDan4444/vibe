@@ -544,10 +544,38 @@ router.post(
         details: { pass_version: passVersion },
       });
 
+      let sms_sent = false;
+      if (member.phone && isSmsConfigured()) {
+        const passUrl = buildPublicPassUrl({
+          gymId,
+          memberId: member.id,
+          passVersion,
+        });
+        if (passUrl) {
+          const contact = await getGymOwnerContact(gymId);
+          sms_sent = await smsMemberPassLink(
+            { id: member.id, name: member.name, phone: member.phone },
+            contact?.gym_name || 'your gym',
+            passUrl
+          );
+          if (sms_sent) {
+            await recordAuditLog({
+              req,
+              action: ACTIONS.MEMBER_PASS_SMS_SENT,
+              entityType: 'member',
+              entityId: member.id,
+              entityLabel: member.name,
+              details: { pass_version: passVersion, reason: 'regenerate' },
+            });
+          }
+        }
+      }
+
       res.json({
         token,
         pass_version: passVersion,
         qr_data_url,
+        sms_sent,
         member: {
           id: member.id,
           name: member.name,
