@@ -93,6 +93,7 @@ router.get('/', validateQuery(memberSmsQuerySchema), async (req, res, next) => {
         s.sent_at,
         m.name AS member_name,
         m.phone AS member_phone,
+        m.photo_url AS member_photo_url,
         m.branch_id,
         b.name AS branch_name
       FROM SmsLog s
