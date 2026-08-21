@@ -75,9 +75,26 @@ function passFingerprint(token) {
   return crypto.createHash('sha256').update(String(token || '')).digest('hex').slice(0, 12);
 }
 
+/**
+ * Public web URL for the member’s check-in pass page (SMS / share).
+ * @param {{ gymId: number, memberId: number, passVersion?: number }} args
+ * @returns {string|null}
+ */
+function buildPublicPassUrl({ gymId, memberId, passVersion }) {
+  try {
+    const token = signMemberPass({ gymId, memberId, passVersion });
+    const frontendBase = (process.env.FRONTEND_URL || 'http://localhost:5173').replace(/\/$/, '');
+    return `${frontendBase}/pass?t=${encodeURIComponent(token)}`;
+  } catch (err) {
+    console.error('[memberPass] Could not build public pass URL:', err.message);
+    return null;
+  }
+}
+
 module.exports = {
   PASS_TYPE,
   signMemberPass,
   verifyMemberPass,
   passFingerprint,
+  buildPublicPassUrl,
 };

@@ -36,7 +36,7 @@ const { ACTIONS, recordAuditLog } = require('../utils/auditLog');
 const { resolveBranchScope, gymBranchParams } = require('../utils/branchScope');
 const { assertBranchInGym, resolveMemberBranchId } = require('../utils/branches');
 const { assignTrainerToMember } = require('../utils/trainers');
-const { signMemberPass } = require('../utils/memberPass');
+const { signMemberPass, buildPublicPassUrl } = require('../utils/memberPass');
 const QRCode = require('qrcode');
 const {
   queryMemberPaidForCurrentTerm,
@@ -248,13 +248,20 @@ router.post('/enroll', requireActiveSubscription, validateBody(enrollMemberSchem
     await client.query('COMMIT');
 
     void getGymOwnerContact(gym_id)
-      .then((contact) =>
-        smsMemberEnrolled(member, contact?.gym_name || 'your gym', {
+      .then((contact) => {
+        const gymName = contact?.gym_name || 'your gym';
+        const passUrl = buildPublicPassUrl({
+          gymId: gym_id,
+          memberId: member.id,
+          passVersion: member.pass_version,
+        });
+        return smsMemberEnrolled(member, gymName, {
           planName,
           startDate: member.start_date,
           endDate: member.end_date,
-        })
-      )
+          passUrl,
+        });
+      })
       .catch((err) => console.error('[SMS] Member enrollment confirmation failed:', err.message));
 
     res.status(201).json({ member, payment, trainer_payment: trainerPayment });
@@ -595,13 +602,14 @@ router.post(
       }
 
       const passVersion = Number(member.pass_version) || 1;
-      const token = signMemberPass({
+      const passUrl = buildPublicPassUrl({
         gymId,
         memberId: member.id,
         passVersion,
       });
-      const frontendBase = (process.env.FRONTEND_URL || 'http://localhost:5173').replace(/\/$/, '');
-      const passUrl = `${frontendBase}/pass?t=${encodeURIComponent(token)}`;
+      if (!passUrl) {
+        return res.status(503).json({ error: 'Pass links are not configured on this server.' });
+      }
 
       const sent = await smsMemberPassLink(
         { id: member.id, name: member.name, phone: member.phone },
@@ -822,9 +830,15 @@ router.post('/:id/renew', requireActiveSubscription, validateParams(idParamSchem
 
     const renewedMember = updatedMember.rows[0];
     void getGymOwnerContact(gym_id)
-      .then((contact) =>
-        smsMemberRenewed(renewedMember, contact?.gym_name || 'your gym', renewedMember.end_date)
-      )
+      .then((contact) => {
+        const gymName = contact?.gym_name || 'your gym';
+        const passUrl = buildPublicPassUrl({
+          gymId: gym_id,
+          memberId: renewedMember.id,
+          passVersion: renewedMember.pass_version,
+        });
+        return smsMemberRenewed(renewedMember, gymName, renewedMember.end_date, { passUrl });
+      })
       .catch((err) => console.error('[SMS] Member renewal confirmation failed:', err.message));
 
     res.json({

@@ -186,10 +186,19 @@ async function smsMemberExpired(member, gymName) {
   });
 }
 
-async function smsMemberRenewed(member, gymName, endDate) {
+/**
+ * @param {{ id: number, name: string, phone?: string }} member
+ * @param {string} gymName
+ * @param {string} endDate
+ * @param {{ passUrl?: string|null }} [opts]
+ */
+async function smsMemberRenewed(member, gymName, endDate, opts = {}) {
   if (!member.phone) return false;
   const ends = formatDisplayDateFromIso(endDate) || 'soon';
-  const message = `Hi ${member.name}, your membership at ${gymName} has been renewed. Your new term ends on ${ends}. Thank you.`;
+  let message = `Hi ${member.name}, your membership at ${gymName} has been renewed. Your new term ends on ${ends}. Thank you.`;
+  if (opts.passUrl) {
+    message += ` Check-in pass: ${opts.passUrl}`;
+  }
   return deliverSms({
     to: member.phone,
     message,
@@ -202,14 +211,17 @@ async function smsMemberRenewed(member, gymName, endDate) {
 /**
  * @param {{ id: number, name: string, phone?: string }} member
  * @param {string} gymName
- * @param {{ planName?: string, startDate?: string, endDate?: string }} term
+ * @param {{ planName?: string, startDate?: string, endDate?: string, passUrl?: string|null }} term
  */
 async function smsMemberEnrolled(member, gymName, term = {}) {
   if (!member.phone) return false;
   const start = formatDisplayDateFromIso(term.startDate) || 'today';
   const ends = formatDisplayDateFromIso(term.endDate) || 'soon';
   const plan = term.planName ? String(term.planName).trim() : 'your plan';
-  const message = `Hi ${member.name}, you are registered at ${gymName} on ${start}. Plan: ${plan}. Your membership ends on ${ends}. Welcome!`;
+  let message = `Hi ${member.name}, you are registered at ${gymName} on ${start}. Plan: ${plan}. Your membership ends on ${ends}. Welcome!`;
+  if (term.passUrl) {
+    message += ` Check-in pass: ${term.passUrl}`;
+  }
   return deliverSms({
     to: member.phone,
     message,
