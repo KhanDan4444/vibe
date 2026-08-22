@@ -157,17 +157,19 @@ const transferMemberSchema = z.object({
 
 const createTrainerSchema = z.object({
   name: trimmed(200),
-  phone: optionalEthiopianPhone,
+  phone: ethiopianPhone,
   specialty: optionalTrimmed(120),
   branch_id: positiveInt,
+  certification: z.union([z.string().max(3_000_000), z.null()]).optional(),
 });
 
 const updateTrainerSchema = z
   .object({
     name: trimmed(200).optional(),
-    phone: optionalEthiopianPhone,
+    phone: ethiopianPhone.optional(),
     specialty: optionalTrimmed(120),
     branch_id: optionalPositiveInt,
+    certification: z.union([z.string().max(3_000_000), z.null()]).optional(),
   })
   .refine((data) => Object.values(data).some((value) => value !== undefined), {
     message: 'At least one field is required.',

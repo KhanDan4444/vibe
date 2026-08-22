@@ -13,6 +13,8 @@ function mapTrainerRow(row) {
     specialty: row.specialty || null,
     branch_id: row.branch_id,
     branch_name: row.branch_name || null,
+    certification_url: row.certification_url || null,
+    has_certification: Boolean(row.certification_url),
     deleted_at: row.deleted_at || null,
     created_at: row.created_at || null,
     member_count: Number(row.member_count) || 0,

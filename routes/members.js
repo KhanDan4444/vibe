@@ -443,10 +443,12 @@ router.get('/:id/pass', validateParams(idParamSchema), async (req, res, next) =>
     const result = await db.query(
       `
       SELECT m.id, m.name, m.phone, m.photo_url, m.pass_version, m.deleted_at,
-             m.branch_id, b.name AS branch_name, g.name AS gym_name
+             m.start_date, m.end_date, m.branch_id, b.name AS branch_name,
+             g.name AS gym_name, p.name AS plan_name
       FROM Members m
       LEFT JOIN Branches b ON b.id = m.branch_id
       LEFT JOIN Gyms g ON g.id = m.gym_id
+      LEFT JOIN Plans p ON p.id = m.plan_id
       WHERE m.id = $1 AND m.gym_id = $2${access.sql ? ' AND m.branch_id = $3' : ''}
       `,
       [id, gymId, ...access.params]
@@ -482,6 +484,9 @@ router.get('/:id/pass', validateParams(idParamSchema), async (req, res, next) =>
         photo_data_url: memberPhotoToDataUrl(member.photo_url),
         branch_id: member.branch_id,
         branch_name: member.branch_name || null,
+        plan_name: member.plan_name || null,
+        start_date: member.start_date || null,
+        end_date: member.end_date || null,
       },
     });
   } catch (error) {
@@ -513,11 +518,28 @@ router.post(
         UPDATE Members
         SET pass_version = COALESCE(pass_version, 1) + 1
         WHERE id = $1 AND gym_id = $2 AND deleted_at IS NULL${access.sql}
-        RETURNING id, name, phone, photo_url, pass_version, branch_id
+        RETURNING id
         `,
         [id, gymId, ...access.params]
       );
-      const member = result.rows[0];
+      if (result.rows.length === 0) {
+        return res.status(404).json({ error: 'Member not found.' });
+      }
+
+      const packed = await db.query(
+        `
+        SELECT m.id, m.name, m.phone, m.photo_url, m.pass_version, m.branch_id,
+               m.start_date, m.end_date, b.name AS branch_name, g.name AS gym_name,
+               p.name AS plan_name
+        FROM Members m
+        LEFT JOIN Branches b ON b.id = m.branch_id
+        LEFT JOIN Gyms g ON g.id = m.gym_id
+        LEFT JOIN Plans p ON p.id = m.plan_id
+        WHERE m.id = $1 AND m.gym_id = $2
+        `,
+        [id, gymId]
+      );
+      const member = packed.rows[0];
       if (!member) {
         return res.status(404).json({ error: 'Member not found.' });
       }
@@ -576,12 +598,18 @@ router.post(
         pass_version: passVersion,
         qr_data_url,
         sms_sent,
+        gym_name: member.gym_name || null,
         member: {
           id: member.id,
           name: member.name,
           phone: member.phone,
           photo_url: member.photo_url || null,
+          photo_data_url: memberPhotoToDataUrl(member.photo_url),
           branch_id: member.branch_id,
+          branch_name: member.branch_name || null,
+          plan_name: member.plan_name || null,
+          start_date: member.start_date || null,
+          end_date: member.end_date || null,
         },
       });
     } catch (error) {

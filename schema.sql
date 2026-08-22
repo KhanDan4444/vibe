@@ -67,6 +67,7 @@ CREATE TABLE IF NOT EXISTS Trainers (
     name VARCHAR(200) NOT NULL,
     phone VARCHAR(30),
     specialty VARCHAR(120),
+    certification_url VARCHAR(512),
     deleted_at TIMESTAMPTZ,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
