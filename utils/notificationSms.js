@@ -194,24 +194,22 @@ async function smsMemberExpired(member, gymName) {
  */
 async function smsMemberRenewed(member, gymName, endDate, opts = {}) {
   if (!member.phone) return { ok: false, error: 'no_phone' };
+  const firstName = String(member.name || '')
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean)[0] || 'there';
   const ends = formatDisplayDateFromIso(endDate) || 'soon';
-  const message = `Hi ${member.name}, your membership at ${gymName} has been renewed. New term ends on ${ends}. Thank you.`;
-  const renewed = await deliverSms({
+  let message = `Hi ${firstName}, your membership at ${gymName} has been renewed. New term ends on ${ends}. Thank you!`;
+  if (opts.passUrl) {
+    message += `\n\nYour Check-in pass: ${opts.passUrl}`;
+  }
+  return deliverSms({
     to: member.phone,
     message,
     messageType: SMS_TYPES.MEMBER_RENEWED,
     entityType: 'member',
     entityId: member.id,
   });
-  if (opts.passUrl) {
-    const pass = await smsMemberPassLink(member, gymName, opts.passUrl);
-    return {
-      ok: renewed.ok,
-      error: renewed.error || (!pass.ok ? pass.error : undefined),
-      pass_sent: pass.ok,
-    };
-  }
-  return renewed;
 }
 
 /**
@@ -221,27 +219,26 @@ async function smsMemberRenewed(member, gymName, endDate, opts = {}) {
  */
 async function smsMemberEnrolled(member, gymName, term = {}) {
   if (!member.phone) return { ok: false, error: 'no_phone' };
-  const start = formatDisplayDateFromIso(term.startDate) || 'today';
+  const firstName = String(member.name || '')
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean)[0] || 'there';
   const ends = formatDisplayDateFromIso(term.endDate) || 'soon';
-  const plan = term.planName ? String(term.planName).trim().replace(/\s*·\s*/g, ' - ') : 'your plan';
-  // Keep enrollment SMS short (no JWT URL) so Afro Message reliably accepts it.
-  const message = `Hi ${member.name}, you are registered at ${gymName} on ${start}. Plan: ${plan}. Ends ${ends}. Welcome!`;
-  const enrolled = await deliverSms({
+  const planLabel = term.planName
+    ? String(term.planName).trim().replace(/\s*·\s*/g, ' - ')
+    : '';
+  const planBit = planLabel ? `Your ${planLabel} membership plan` : 'Your membership';
+  let message = `Hi ${firstName}, welcome to ${gymName}. ${planBit} is active until ${ends}. We're glad to have you!`;
+  if (term.passUrl) {
+    message += `\n\nYour Check-in pass: ${term.passUrl}`;
+  }
+  return deliverSms({
     to: member.phone,
     message,
     messageType: SMS_TYPES.MEMBER_ENROLLED,
     entityType: 'member',
     entityId: member.id,
   });
-  if (term.passUrl) {
-    const pass = await smsMemberPassLink(member, gymName, term.passUrl);
-    return {
-      ok: enrolled.ok,
-      error: enrolled.error || (!pass.ok ? pass.error : undefined),
-      pass_sent: pass.ok,
-    };
-  }
-  return enrolled;
 }
 
 /**
@@ -252,7 +249,11 @@ async function smsMemberEnrolled(member, gymName, term = {}) {
  */
 async function smsMemberPassLink(member, gymName, passUrl) {
   if (!member.phone) return { ok: false, error: 'no_phone' };
-  const message = `Hi ${member.name}, your ${gymName} check-in pass: ${passUrl} Open the link and show the QR at the desk.`;
+  const firstName = String(member.name || '')
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean)[0] || 'there';
+  const message = `Hi ${firstName}, your ${gymName} check-in pass: ${passUrl} Show the QR at the desk when you arrive.`;
   return deliverSms({
     to: member.phone,
     message,

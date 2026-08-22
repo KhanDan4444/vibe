@@ -91,9 +91,14 @@ CREATE TABLE IF NOT EXISTS Members (
     photo_url VARCHAR(512),
     deleted_at TIMESTAMPTZ,
     pass_version INT NOT NULL DEFAULT 1,
+    pass_public_code VARCHAR(16),
     -- Forces client-level member tracking records to remain uniform
     CONSTRAINT check_member_status_lowercase CHECK (status = LOWER(status))
 );
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_members_pass_public_code
+    ON Members (pass_public_code)
+    WHERE pass_public_code IS NOT NULL;
 
 CREATE INDEX IF NOT EXISTS idx_members_gym_live
     ON Members (gym_id)

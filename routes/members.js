@@ -36,7 +36,7 @@ const { ACTIONS, recordAuditLog } = require('../utils/auditLog');
 const { resolveBranchScope, gymBranchParams } = require('../utils/branchScope');
 const { assertBranchInGym, resolveMemberBranchId, assertMemberBranchWritable } = require('../utils/branches');
 const { assignTrainerToMember } = require('../utils/trainers');
-const { signMemberPass, buildPublicPassUrl } = require('../utils/memberPass');
+const { signMemberPass, buildPublicPassUrl, rotatePassPublicCode } = require('../utils/memberPass');
 const QRCode = require('qrcode');
 const {
   queryMemberPaidForCurrentTerm,
@@ -256,7 +256,7 @@ router.post('/enroll', requireActiveSubscription, validateBody(enrollMemberSchem
         try {
           const contact = await getGymOwnerContact(gym_id);
           const gymName = contact?.gym_name || 'your gym';
-          const passUrl = buildPublicPassUrl({
+          const passUrl = await buildPublicPassUrl({
             gymId: gym_id,
             memberId: member.id,
             passVersion: member.pass_version,
@@ -549,6 +549,8 @@ router.post(
         return res.status(404).json({ error: 'Member not found.' });
       }
 
+      await rotatePassPublicCode(result.rows[0].id);
+
       const packed = await db.query(
         `
         SELECT m.id, m.name, m.phone, m.photo_url, m.pass_version, m.branch_id,
@@ -591,7 +593,7 @@ router.post(
 
       let sms_sent = false;
       if (member.phone && isSmsConfigured()) {
-        const passUrl = buildPublicPassUrl({
+        const passUrl = await buildPublicPassUrl({
           gymId,
           memberId: member.id,
           passVersion,
@@ -682,7 +684,7 @@ router.post(
       }
 
       const passVersion = Number(member.pass_version) || 1;
-      const passUrl = buildPublicPassUrl({
+      const passUrl = await buildPublicPassUrl({
         gymId,
         memberId: member.id,
         passVersion,
@@ -920,7 +922,7 @@ router.post('/:id/renew', requireActiveSubscription, validateParams(idParamSchem
         try {
           const contact = await getGymOwnerContact(gym_id);
           const gymName = contact?.gym_name || 'your gym';
-          const passUrl = buildPublicPassUrl({
+          const passUrl = await buildPublicPassUrl({
             gymId: gym_id,
             memberId: renewedMember.id,
             passVersion: renewedMember.pass_version,
