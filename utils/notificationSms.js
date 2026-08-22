@@ -104,7 +104,7 @@ async function deliverSms({ to, message, messageType, entityType, entityId, skip
     console.warn(
       `[SMS] Skipped ${messageType}: invalid or missing phone for ${entityType}:${entityId ?? 'n/a'}`
     );
-    return false;
+    return { ok: false, error: 'invalid_phone' };
   }
 
   if (
@@ -112,7 +112,7 @@ async function deliverSms({ to, message, messageType, entityType, entityId, skip
     entityId != null &&
     (await wasSmsSentToday(messageType, entityType, entityId))
   ) {
-    return false;
+    return { ok: false, error: 'already_sent_today' };
   }
 
   try {
@@ -124,10 +124,10 @@ async function deliverSms({ to, message, messageType, entityType, entityId, skip
       entityId,
       messageId: result.message_id,
     });
-    return true;
+    return { ok: true };
   } catch (err) {
     console.error(`[SMS] Failed ${messageType} entity=${entityType}:${entityId}:`, err.message);
-    return false;
+    return { ok: false, error: err.message || 'send_failed' };
   }
 }
 
@@ -150,7 +150,7 @@ async function getGymOwnerContact(gymId) {
  * @param {string} gymName
  */
 async function smsMemberDueSoon(member, gymName) {
-  if (!member.phone) return false;
+  if (!member.phone) return { ok: false, error: 'no_phone' };
   const endDate = formatDisplayDateFromIso(member.end_date) || 'soon';
   const message = `Hi ${member.name}, your membership at ${gymName} ends on ${endDate}. Please visit the gym to renew.`;
   return deliverSms({
@@ -163,7 +163,7 @@ async function smsMemberDueSoon(member, gymName) {
 }
 
 async function smsMemberExpiresToday(member, gymName) {
-  if (!member.phone) return false;
+  if (!member.phone) return { ok: false, error: 'no_phone' };
   const message = `Hi ${member.name}, your membership at ${gymName} expires today. Renew at the front desk to stay active.`;
   return deliverSms({
     to: member.phone,
@@ -175,7 +175,7 @@ async function smsMemberExpiresToday(member, gymName) {
 }
 
 async function smsMemberExpired(member, gymName) {
-  if (!member.phone) return false;
+  if (!member.phone) return { ok: false, error: 'no_phone' };
   const message = `Hi ${member.name}, your membership at ${gymName} has expired. Contact the gym to renew.`;
   return deliverSms({
     to: member.phone,
@@ -193,19 +193,25 @@ async function smsMemberExpired(member, gymName) {
  * @param {{ passUrl?: string|null }} [opts]
  */
 async function smsMemberRenewed(member, gymName, endDate, opts = {}) {
-  if (!member.phone) return false;
+  if (!member.phone) return { ok: false, error: 'no_phone' };
   const ends = formatDisplayDateFromIso(endDate) || 'soon';
-  let message = `Hi ${member.name}, your membership at ${gymName} has been renewed. Your new term ends on ${ends}. Thank you.`;
-  if (opts.passUrl) {
-    message += ` Check-in pass: ${opts.passUrl}`;
-  }
-  return deliverSms({
+  const message = `Hi ${member.name}, your membership at ${gymName} has been renewed. New term ends on ${ends}. Thank you.`;
+  const renewed = await deliverSms({
     to: member.phone,
     message,
     messageType: SMS_TYPES.MEMBER_RENEWED,
     entityType: 'member',
     entityId: member.id,
   });
+  if (opts.passUrl) {
+    const pass = await smsMemberPassLink(member, gymName, opts.passUrl);
+    return {
+      ok: renewed.ok,
+      error: renewed.error || (!pass.ok ? pass.error : undefined),
+      pass_sent: pass.ok,
+    };
+  }
+  return renewed;
 }
 
 /**
@@ -214,21 +220,28 @@ async function smsMemberRenewed(member, gymName, endDate, opts = {}) {
  * @param {{ planName?: string, startDate?: string, endDate?: string, passUrl?: string|null }} term
  */
 async function smsMemberEnrolled(member, gymName, term = {}) {
-  if (!member.phone) return false;
+  if (!member.phone) return { ok: false, error: 'no_phone' };
   const start = formatDisplayDateFromIso(term.startDate) || 'today';
   const ends = formatDisplayDateFromIso(term.endDate) || 'soon';
-  const plan = term.planName ? String(term.planName).trim() : 'your plan';
-  let message = `Hi ${member.name}, you are registered at ${gymName} on ${start}. Plan: ${plan}. Your membership ends on ${ends}. Welcome!`;
-  if (term.passUrl) {
-    message += ` Check-in pass: ${term.passUrl}`;
-  }
-  return deliverSms({
+  const plan = term.planName ? String(term.planName).trim().replace(/\s*·\s*/g, ' - ') : 'your plan';
+  // Keep enrollment SMS short (no JWT URL) so Afro Message reliably accepts it.
+  const message = `Hi ${member.name}, you are registered at ${gymName} on ${start}. Plan: ${plan}. Ends ${ends}. Welcome!`;
+  const enrolled = await deliverSms({
     to: member.phone,
     message,
     messageType: SMS_TYPES.MEMBER_ENROLLED,
     entityType: 'member',
     entityId: member.id,
   });
+  if (term.passUrl) {
+    const pass = await smsMemberPassLink(member, gymName, term.passUrl);
+    return {
+      ok: enrolled.ok,
+      error: enrolled.error || (!pass.ok ? pass.error : undefined),
+      pass_sent: pass.ok,
+    };
+  }
+  return enrolled;
 }
 
 /**
@@ -238,7 +251,7 @@ async function smsMemberEnrolled(member, gymName, term = {}) {
  * @param {string} passUrl
  */
 async function smsMemberPassLink(member, gymName, passUrl) {
-  if (!member.phone) return false;
+  if (!member.phone) return { ok: false, error: 'no_phone' };
   const message = `Hi ${member.name}, your ${gymName} check-in pass: ${passUrl} Open the link and show the QR at the desk.`;
   return deliverSms({
     to: member.phone,
@@ -253,7 +266,7 @@ async function smsMemberPassLink(member, gymName, passUrl) {
 async function smsGymLicenseDueIn3Days(gym, endDate, planName) {
   const contact = await getGymOwnerContact(gym.id);
   const phone = contact?.phone || gym.phone;
-  if (!phone) return false;
+  if (!phone) return { ok: false, error: 'no_phone' };
   const gymName = gym.name || contact?.gym_name || 'your gym';
   const message = `${SMS_BRAND}: Your platform license for ${gymName} (${planName || 'plan'}) ends in 3 days (${formatDisplayDateFromIso(endDate)}). Contact your administrator to renew.`;
   return deliverSms({
@@ -268,7 +281,7 @@ async function smsGymLicenseDueIn3Days(gym, endDate, planName) {
 async function smsGymLicenseExpiresToday(gym) {
   const contact = await getGymOwnerContact(gym.id);
   const phone = contact?.phone || gym.phone;
-  if (!phone) return false;
+  if (!phone) return { ok: false, error: 'no_phone' };
   const gymName = gym.name || contact?.gym_name || 'your gym';
   const message = `${SMS_BRAND}: Your platform license for ${gymName} expires today. Renew now to avoid interruption.`;
   return deliverSms({
@@ -283,7 +296,7 @@ async function smsGymLicenseExpiresToday(gym) {
 async function smsGymLicenseExpired(gym, endDate) {
   const contact = await getGymOwnerContact(gym.id);
   const phone = contact?.phone || gym.phone;
-  if (!phone) return false;
+  if (!phone) return { ok: false, error: 'no_phone' };
   const gymName = gym.name || contact?.gym_name || 'your gym';
   const message = `${SMS_BRAND}: Your platform license for ${gymName} expired on ${formatDisplayDateFromIso(endDate)}. Contact your administrator to restore access.`;
   return deliverSms({
@@ -298,7 +311,7 @@ async function smsGymLicenseExpired(gym, endDate) {
 async function smsGymLicenseRenewed(gym, endDate, planName) {
   const contact = await getGymOwnerContact(gym.id);
   const phone = contact?.phone || gym.phone;
-  if (!phone) return false;
+  if (!phone) return { ok: false, error: 'no_phone' };
   const gymName = gym.name || contact?.gym_name || 'your gym';
   const ends = formatDisplayDateFromIso(endDate) || 'soon';
   const message = `${SMS_BRAND}: Your platform license for ${gymName} (${planName || 'plan'}) has been renewed. New term ends on ${ends}.`;

@@ -247,24 +247,47 @@ router.post('/enroll', requireActiveSubscription, validateBody(enrollMemberSchem
 
     await client.query('COMMIT');
 
-    void getGymOwnerContact(gym_id)
-      .then((contact) => {
-        const gymName = contact?.gym_name || 'your gym';
-        const passUrl = buildPublicPassUrl({
-          gymId: gym_id,
-          memberId: member.id,
-          passVersion: member.pass_version,
-        });
-        return smsMemberEnrolled(member, gymName, {
-          planName,
-          startDate: member.start_date,
-          endDate: member.end_date,
-          passUrl,
-        });
-      })
-      .catch((err) => console.error('[SMS] Member enrollment confirmation failed:', err.message));
+    let sms_sent = false;
+    let sms_error = null;
+    if (member.phone) {
+      if (!isSmsConfigured()) {
+        sms_error = 'SMS is not configured on this server.';
+      } else {
+        try {
+          const contact = await getGymOwnerContact(gym_id);
+          const gymName = contact?.gym_name || 'your gym';
+          const passUrl = buildPublicPassUrl({
+            gymId: gym_id,
+            memberId: member.id,
+            passVersion: member.pass_version,
+          });
+          const smsResult = await smsMemberEnrolled(member, gymName, {
+            planName,
+            startDate: member.start_date,
+            endDate: member.end_date,
+            passUrl,
+          });
+          sms_sent = Boolean(smsResult?.ok);
+          if (!sms_sent) {
+            sms_error =
+              smsResult?.error && !['already_sent_today', 'no_phone', 'invalid_phone'].includes(smsResult.error)
+                ? smsResult.error
+                : 'Welcome SMS could not be delivered.';
+          }
+        } catch (err) {
+          console.error('[SMS] Member enrollment confirmation failed:', err.message);
+          sms_error = err.message || 'Welcome SMS could not be delivered.';
+        }
+      }
+    }
 
-    res.status(201).json({ member, payment, trainer_payment: trainerPayment });
+    res.status(201).json({
+      member,
+      payment,
+      trainer_payment: trainerPayment,
+      sms_sent,
+      sms_error,
+    });
   } catch (error) {
     await client.query('ROLLBACK');
     next(error);
@@ -575,11 +598,12 @@ router.post(
         });
         if (passUrl) {
           const contact = await getGymOwnerContact(gymId);
-          sms_sent = await smsMemberPassLink(
+          const smsResult = await smsMemberPassLink(
             { id: member.id, name: member.name, phone: member.phone },
             contact?.gym_name || 'your gym',
             passUrl
           );
+          sms_sent = Boolean(smsResult?.ok);
           if (sms_sent) {
             await recordAuditLog({
               req,
@@ -667,13 +691,15 @@ router.post(
         return res.status(503).json({ error: 'Pass links are not configured on this server.' });
       }
 
-      const sent = await smsMemberPassLink(
+      const smsResult = await smsMemberPassLink(
         { id: member.id, name: member.name, phone: member.phone },
         member.gym_name || 'your gym',
         passUrl
       );
-      if (!sent) {
-        return res.status(502).json({ error: 'Could not send the pass SMS. Try again.' });
+      if (!smsResult?.ok) {
+        return res.status(502).json({
+          error: smsResult?.error || 'Could not send the pass SMS. Try again.',
+        });
       }
 
       await recordAuditLog({
@@ -885,21 +911,42 @@ router.post('/:id/renew', requireActiveSubscription, validateParams(idParamSchem
     await client.query('COMMIT');
 
     const renewedMember = updatedMember.rows[0];
-    void getGymOwnerContact(gym_id)
-      .then((contact) => {
-        const gymName = contact?.gym_name || 'your gym';
-        const passUrl = buildPublicPassUrl({
-          gymId: gym_id,
-          memberId: renewedMember.id,
-          passVersion: renewedMember.pass_version,
-        });
-        return smsMemberRenewed(renewedMember, gymName, renewedMember.end_date, { passUrl });
-      })
-      .catch((err) => console.error('[SMS] Member renewal confirmation failed:', err.message));
+    let sms_sent = false;
+    let sms_error = null;
+    if (renewedMember.phone) {
+      if (!isSmsConfigured()) {
+        sms_error = 'SMS is not configured on this server.';
+      } else {
+        try {
+          const contact = await getGymOwnerContact(gym_id);
+          const gymName = contact?.gym_name || 'your gym';
+          const passUrl = buildPublicPassUrl({
+            gymId: gym_id,
+            memberId: renewedMember.id,
+            passVersion: renewedMember.pass_version,
+          });
+          const smsResult = await smsMemberRenewed(renewedMember, gymName, renewedMember.end_date, {
+            passUrl,
+          });
+          sms_sent = Boolean(smsResult?.ok);
+          if (!sms_sent) {
+            sms_error =
+              smsResult?.error && !['already_sent_today', 'no_phone', 'invalid_phone'].includes(smsResult.error)
+                ? smsResult.error
+                : 'Renewal SMS could not be delivered.';
+          }
+        } catch (err) {
+          console.error('[SMS] Member renewal confirmation failed:', err.message);
+          sms_error = err.message || 'Renewal SMS could not be delivered.';
+        }
+      }
+    }
 
     res.json({
       member: renewedMember,
       payment: paymentResult.rows[0],
+      sms_sent,
+      sms_error,
     });
   } catch (error) {
     await client.query('ROLLBACK');

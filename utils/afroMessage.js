@@ -58,19 +58,36 @@ function optionalAfroBodyFields() {
  * @param {import('node-fetch').Response} res
  */
 async function parseAfroJson(res) {
+  const raw = await res.text();
   let body;
   try {
-    body = await res.json();
+    body = raw ? JSON.parse(raw) : null;
   } catch {
-    const err = new Error('Invalid response from SMS provider.');
+    const snippet = String(raw || '')
+      .replace(/\s+/g, ' ')
+      .trim()
+      .slice(0, 240);
+    const err = new Error(
+      snippet
+        ? `Invalid response from SMS provider (HTTP ${res.status}): ${snippet}`
+        : `Invalid response from SMS provider (HTTP ${res.status}, empty body).`
+    );
+    err.statusCode = 502;
+    throw err;
+  }
+
+  if (!body || typeof body !== 'object') {
+    const err = new Error(`Invalid response from SMS provider (HTTP ${res.status}).`);
     err.statusCode = 502;
     throw err;
   }
 
   if (!res.ok || body.acknowledge !== 'success') {
     const msg =
-      body.response?.errors?.join?.(' ') ||
+      (Array.isArray(body.response?.errors) && body.response.errors.filter(Boolean).join(' ')) ||
       body.response?.status ||
+      body.response?.message ||
+      (typeof body.response === 'string' ? body.response : null) ||
       `SMS provider error (HTTP ${res.status})`;
     const err = new Error(msg);
     err.statusCode = res.ok ? 400 : res.status >= 500 ? 502 : 400;
@@ -115,7 +132,7 @@ async function sendOtp(to, options = {}) {
 
   const res = await fetch(`${BASE_URL}/challenge?${params.toString()}`, {
     method: 'GET',
-    headers: authHeaders(),
+    headers: { ...authHeaders(), Accept: 'application/json' },
   });
 
   const response = await parseAfroJson(res);
@@ -154,7 +171,7 @@ async function verifyOtp({ verificationId, phone, code }) {
 
   const res = await fetch(`${BASE_URL}/verify?${params.toString()}`, {
     method: 'GET',
-    headers: authHeaders(),
+    headers: { ...authHeaders(), Accept: 'application/json' },
   });
 
   return parseAfroJson(res);
@@ -171,15 +188,22 @@ async function sendSms(to, message) {
     return { message_id: `dev-${Date.now()}`, to, status: 'dev-logged' };
   }
 
+  const text = String(message || '').trim();
+  if (!text) {
+    const err = new Error('SMS message is empty.');
+    err.statusCode = 400;
+    throw err;
+  }
+
   const body = {
     to,
-    message,
+    message: text,
     ...optionalAfroBodyFields(),
   };
 
   const res = await fetch(`${BASE_URL}/send`, {
     method: 'POST',
-    headers: authHeaders(),
+    headers: { ...authHeaders(), Accept: 'application/json' },
     body: JSON.stringify(body),
   });
 
