@@ -34,7 +34,7 @@ const {
 } = require('../validation/schemas');
 const { ACTIONS, recordAuditLog } = require('../utils/auditLog');
 const { resolveBranchScope, gymBranchParams } = require('../utils/branchScope');
-const { assertBranchInGym, resolveMemberBranchId } = require('../utils/branches');
+const { assertBranchInGym, resolveMemberBranchId, assertMemberBranchWritable } = require('../utils/branches');
 const { assignTrainerToMember } = require('../utils/trainers');
 const { signMemberPass, buildPublicPassUrl } = require('../utils/memberPass');
 const QRCode = require('qrcode');
