@@ -141,7 +141,7 @@ router.get('/', async (req, res, next) => {
           AND m.end_date <= CURRENT_DATE + INTERVAL '${DUE_SOON_DAYS} days'
           AND NOT (${MEMBER_UNPAID_SQL})
         ORDER BY m.end_date ASC
-        LIMIT 5
+        LIMIT 12
         `,
         qp
       ),
