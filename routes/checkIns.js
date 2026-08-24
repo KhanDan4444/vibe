@@ -41,13 +41,29 @@ const createCheckInSchema = z
     message: 'Provide exactly one of member_id or member_pass_token.',
   });
 
-const listQuerySchema = z.object({
-  date: z
-    .string()
-    .regex(/^\d{4}-\d{2}-\d{2}$/)
-    .optional(),
-  limit: z.coerce.number().int().min(1).max(100).optional().default(50),
-});
+const listQuerySchema = z
+  .object({
+    date: z
+      .string()
+      .regex(/^\d{4}-\d{2}-\d{2}$/)
+      .optional(),
+    from: z
+      .string()
+      .regex(/^\d{4}-\d{2}-\d{2}$/)
+      .optional(),
+    to: z
+      .string()
+      .regex(/^\d{4}-\d{2}-\d{2}$/)
+      .optional(),
+    member_id: z.coerce.number().int().positive().optional(),
+    limit: z.coerce.number().int().min(1).max(200).optional().default(50),
+  })
+  .refine((q) => !(q.from && !q.to) && !(q.to && !q.from), {
+    message: 'Provide both from and to, or neither.',
+  })
+  .refine((q) => !(q.date && (q.from || q.to)), {
+    message: 'Use either date or from/to, not both.',
+  });
 
 const searchQuerySchema = z.object({
   q: z.string().trim().min(1).max(100),
@@ -223,20 +239,59 @@ router.get('/members/:id/summary', async (req, res, next) => {
   }
 });
 
-/** GET /api/check-ins — today's (or date) log */
+/** GET /api/check-ins — today / single date / date range / member recent */
 router.get('/', validateQuery(listQuerySchema), async (req, res, next) => {
   try {
     const scope = await resolveBranchScope(req);
     if (scope.error) {
       return res.status(400).json({ error: scope.error });
     }
-    const date = req.query.date || toDateString(new Date());
+
     const limit = req.query.limit;
-    const branchSql = scope.branchId ? ' AND c.branch_id = $3' : '';
-    const params = scope.branchId
-      ? [req.user.gym_id, date, scope.branchId, limit]
-      : [req.user.gym_id, date, limit];
-    const limitIdx = scope.branchId ? 4 : 3;
+    const memberId = req.query.member_id || null;
+    const rangeMode = Boolean(req.query.from && req.query.to);
+    const memberRecentMode = Boolean(memberId) && !rangeMode && !req.query.date;
+    const date = rangeMode || memberRecentMode ? null : req.query.date || toDateString(new Date());
+    let from = req.query.from || null;
+    let to = req.query.to || null;
+
+    if (rangeMode) {
+      const fromDate = new Date(`${from}T00:00:00`);
+      const toDate = new Date(`${to}T00:00:00`);
+      if (Number.isNaN(fromDate.getTime()) || Number.isNaN(toDate.getTime()) || toDate < fromDate) {
+        return res.status(400).json({ error: 'Invalid from/to range.' });
+      }
+      const daySpan = Math.floor((toDate - fromDate) / (24 * 60 * 60 * 1000)) + 1;
+      if (daySpan > 14) {
+        return res.status(400).json({ error: 'Date range cannot exceed 14 days.' });
+      }
+    }
+
+    const params = [req.user.gym_id];
+    const filters = ['c.gym_id = $1'];
+
+    if (rangeMode) {
+      params.push(from, to);
+      filters.push(`c.checked_in_at::date >= $${params.length - 1}::date`);
+      filters.push(`c.checked_in_at::date <= $${params.length}::date`);
+    } else if (!memberRecentMode) {
+      params.push(date);
+      filters.push(`c.checked_in_at::date = $${params.length}::date`);
+    }
+
+    if (scope.branchId) {
+      params.push(scope.branchId);
+      filters.push(`c.branch_id = $${params.length}`);
+    }
+
+    if (memberId) {
+      params.push(memberId);
+      filters.push(`c.member_id = $${params.length}`);
+    }
+
+    params.push(limit);
+    const limitIdx = params.length;
+    const whereSql = filters.join('\n        AND ');
 
     const result = await db.query(
       `
@@ -250,31 +305,34 @@ router.get('/', validateQuery(listQuerySchema), async (req, res, next) => {
       JOIN Members m ON m.id = c.member_id
       LEFT JOIN Branches b ON b.id = c.branch_id
       LEFT JOIN Users u ON u.id = c.checked_in_by_user_id
-      WHERE c.gym_id = $1
-        AND c.checked_in_at::date = $2::date
-        ${branchSql}
+      WHERE ${whereSql}
       ORDER BY c.checked_in_at DESC
       LIMIT $${limitIdx}
       `,
       params
     );
 
+    const countParams = params.slice(0, -1);
     const countResult = await db.query(
       `
       SELECT COUNT(*)::int AS count
       FROM CheckIns c
-      WHERE c.gym_id = $1
-        AND c.checked_in_at::date = $2::date
-        ${branchSql}
+      WHERE ${whereSql}
       `,
-      scope.branchId ? [req.user.gym_id, date, scope.branchId] : [req.user.gym_id, date]
+      countParams
     );
 
-    res.json({
-      date,
+    const payload = {
       total: countResult.rows[0].count,
       checkIns: result.rows.map(mapCheckInRow),
-    });
+    };
+    if (rangeMode) {
+      payload.from = from;
+      payload.to = to;
+    } else if (!memberRecentMode) {
+      payload.date = date;
+    }
+    res.json(payload);
   } catch (error) {
     next(error);
   }
