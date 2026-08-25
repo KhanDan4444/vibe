@@ -11,7 +11,7 @@ const checkSubscription = require('../middleware/subscriptionCheck');
 const requireGymAccess = require('../middleware/requireGymAccess');
 const requireGymOwner = require('../middleware/requireGymOwner');
 const { MEMBER_UNPAID_SQL, MEMBER_LIVE_SQL, MEMBER_LIVE_BARE_SQL } = require('../utils/memberListSql');
-const { DUE_SOON_DAYS } = require('../utils/memberStatus');
+const { DUE_SOON_DAYS, ATTENTION_DUE_SOON_DAYS, canRenewOnDate } = require('../utils/memberStatus');
 const { computePercentChange, computeCountDelta } = require('../utils/periodComparison');
 const { resolveBranchScope, gymBranchParams } = require('../utils/branchScope');
 const { fetchBranchComparisonMetrics } = require('../utils/branchComparison');
@@ -138,7 +138,7 @@ router.get('/', async (req, res, next) => {
         FROM Members m
         LEFT JOIN Plans p ON p.id = m.plan_id
         WHERE m.gym_id = $1${ma}${MEMBER_LIVE_SQL}
-          AND m.end_date <= CURRENT_DATE + INTERVAL '${DUE_SOON_DAYS} days'
+          AND m.end_date <= CURRENT_DATE + INTERVAL '${ATTENTION_DUE_SOON_DAYS} days'
           AND NOT (${MEMBER_UNPAID_SQL})
         ORDER BY m.end_date ASC
         LIMIT 12
@@ -186,7 +186,7 @@ router.get('/', async (req, res, next) => {
         LEFT JOIN Branches b ON b.id = m.branch_id
         WHERE m.gym_id = $1${ma}${MEMBER_LIVE_SQL}
           AND m.end_date >= CURRENT_DATE
-          AND m.end_date <= CURRENT_DATE + INTERVAL '${DUE_SOON_DAYS} days'
+          AND m.end_date <= CURRENT_DATE + INTERVAL '${ATTENTION_DUE_SOON_DAYS} days'
           AND NOT (${MEMBER_UNPAID_SQL})
         ORDER BY m.end_date ASC
         LIMIT 10
@@ -272,9 +272,9 @@ router.get('/', async (req, res, next) => {
         branchName: member.branch_name,
         type: 'warning',
         title: 'Expiring Soon',
-        message: `${member.name}'s ${planName} expires in less than 3 days (on ${member.end_date}).`,
+        message: `${member.name}'s ${planName} expires in less than ${ATTENTION_DUE_SOON_DAYS} days (on ${member.end_date}).`,
         date: 'System Alert',
-        suggestedAction: 'renew',
+        suggestedAction: canRenewOnDate(member.end_date) ? 'renew' : 'view',
       });
     });
 

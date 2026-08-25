@@ -17,7 +17,7 @@ const requireGymAccess = require('../middleware/requireGymAccess');
 const requireGymOwner = require('../middleware/requireGymOwner');
 const { calculateEndDate } = require('../utils/memberDates');
 const { todayLocalString } = require('../utils/localDate');
-const { deriveMemberStatusFromEndDate, normalizeMemberStatus, MEMBER_STATUS } = require('../utils/memberStatus');
+const { deriveMemberStatusFromEndDate, normalizeMemberStatus, MEMBER_STATUS, MEMBER_STATUS_CASE_SQL, canRenewOnDate } = require('../utils/memberStatus');
 const { parsePaginationQuery, paginatedResponse } = require('../utils/pagination');
 const { parseMemberListSortOrder } = require('../utils/listSortSql');
 const { buildMemberListFilters, MEMBER_IS_UNPAID_SELECT, MEMBER_LIVE_BARE_SQL, MEMBER_LIST_FROM, MEMBER_LIST_SELECT } = require('../utils/memberListSql');
@@ -320,11 +320,7 @@ router.get('/', validateQuery(memberListQuerySchema), async (req, res, next) => 
     await db.query(
       `
       UPDATE Members
-      SET status = CASE
-        WHEN end_date < CURRENT_DATE THEN 'expired'
-        WHEN end_date <= CURRENT_DATE + INTERVAL '3 days' THEN 'due soon'
-        ELSE 'active'
-      END
+      SET status = ${MEMBER_STATUS_CASE_SQL}
       WHERE gym_id = $1${syncBranch}${MEMBER_LIVE_BARE_SQL} AND LOWER(status) IN ('active', 'due soon', 'expired')
       `,
       syncParams
@@ -832,6 +828,14 @@ router.post('/:id/renew', requireActiveSubscription, validateParams(idParamSchem
       return res.status(409).json({
         error:
           'This member has no payment for their current term. Collect payment first, then renew when the term ends.',
+      });
+    }
+
+    if (!canRenewOnDate(currentMember.end_date)) {
+      await client.query('ROLLBACK');
+      return res.status(409).json({
+        error:
+          'Renew is available on the membership end date or after the term has expired. Until then the current term stays active.',
       });
     }
 

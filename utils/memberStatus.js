@@ -9,8 +9,14 @@ const MEMBER_STATUS = {
   DUE_SOON: 'due soon',
 };
 
-/** Days before end_date when a member is flagged due soon. */
-const DUE_SOON_DAYS = 3;
+/** Days before end_date when a member is flagged due soon (chips / filters / counts). */
+const DUE_SOON_DAYS = 7;
+
+/** Dashboard Needs attention list + urgent due-soon inbox window. */
+const ATTENTION_DUE_SOON_DAYS = 3;
+
+/** Gym SaaS license due-soon window (platform admin). */
+const GYM_LICENSE_DUE_SOON_DAYS = 3;
 
 /** @param {string | undefined} status */
 function normalizeMemberStatus(status) {
@@ -39,10 +45,23 @@ const MEMBER_STATUS_CASE_SQL = `
   END
 `;
 
+/**
+ * Renew is allowed on the membership end date or after it has expired
+ * (new term still starts the day after end_date when paid through).
+ */
+function canRenewOnDate(endDateStr, todayStr = todayLocalString()) {
+  const end = String(endDateStr || '').split('T')[0];
+  if (!end) return false;
+  return todayStr >= end;
+}
+
 module.exports = {
   MEMBER_STATUS,
   DUE_SOON_DAYS,
+  ATTENTION_DUE_SOON_DAYS,
+  GYM_LICENSE_DUE_SOON_DAYS,
   normalizeMemberStatus,
   deriveMemberStatusFromEndDate,
   MEMBER_STATUS_CASE_SQL,
+  canRenewOnDate,
 };

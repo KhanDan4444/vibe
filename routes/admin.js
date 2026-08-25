@@ -14,7 +14,7 @@ const db = require('../config/db');
 const auth = require('../middleware/auth');
 const adminCheck = require('../middleware/adminCheck');
 const { ROLES } = require('../utils/roles');
-const { DUE_SOON_DAYS } = require('../utils/memberStatus');
+const { DUE_SOON_DAYS, GYM_LICENSE_DUE_SOON_DAYS } = require('../utils/memberStatus');
 const { MEMBER_UNPAID_SQL, MEMBER_LIVE_SQL } = require('../utils/memberListSql');
 const { createDefaultBranch } = require('../utils/branches');
 const { assignSaasPlanToGym } = require('../utils/saasSubscription');
@@ -982,7 +982,7 @@ router.get('/dashboard', async (req, res, next) => {
       JOIN GymSubscriptions gs ON gs.gym_id = g.id
       WHERE LOWER(g.subscription_status) = 'active'
         AND g.deleted_at IS NULL
-        AND gs.end_date BETWEEN CURRENT_DATE AND CURRENT_DATE + INTERVAL '${DUE_SOON_DAYS} days'
+        AND gs.end_date BETWEEN CURRENT_DATE AND CURRENT_DATE + INTERVAL '${GYM_LICENSE_DUE_SOON_DAYS} days'
     `),
       db.query(`
       SELECT g.name, COUNT(m.id) FILTER (

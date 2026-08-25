@@ -35,12 +35,12 @@ const GYM_IS_UNPAID_SELECT = `
   ) AS is_unpaid
 `;
 
-const { DUE_SOON_DAYS } = require('./memberStatus');
+const { GYM_LICENSE_DUE_SOON_DAYS } = require('./memberStatus');
 
 const GYM_DUE_SOON_SQL = `
   LOWER(g.subscription_status) = 'active'
   AND g.saas_end_date IS NOT NULL
-  AND g.saas_end_date::date BETWEEN CURRENT_DATE AND (CURRENT_DATE + INTERVAL '${DUE_SOON_DAYS} days')
+  AND g.saas_end_date::date BETWEEN CURRENT_DATE AND (CURRENT_DATE + INTERVAL '${GYM_LICENSE_DUE_SOON_DAYS} days')
 `;
 
 const GYM_EXPIRED_OR_SUSPENDED_SQL = `
