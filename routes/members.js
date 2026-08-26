@@ -237,9 +237,11 @@ router.post('/enroll', requireActiveSubscription, validateBody(enrollMemberSchem
       entityType: 'member',
       entityId: memberResult.rows[0].id,
       entityLabel: member.name,
+      branchId: branch_id,
       details: {
         plan_id,
         start_date,
+        branch_id,
         skip_payment: !!skip_payment,
         payment_amount: payment ? parseFloat(payment.amount) : null,
         payment_method: payment?.method || null,
@@ -906,10 +908,12 @@ router.post('/:id/renew', requireActiveSubscription, validateParams(idParamSchem
       entityType: 'member',
       entityId: updatedMember.rows[0].id,
       entityLabel: updatedMember.rows[0].name,
+      branchId: updatedMember.rows[0].branch_id,
       details: {
         plan_id: targetPlanId,
         start_date: targetStartDate,
         end_date,
+        branch_id: updatedMember.rows[0].branch_id,
         payment_amount: parseFloat(paymentResult.rows[0].amount),
         payment_method: paymentResult.rows[0].method,
       },
@@ -1137,12 +1141,14 @@ router.post(
         entityType: 'member',
         entityId: updatedMember.rows[0].id,
         entityLabel: updatedMember.rows[0].name,
+        branchId: updatedMember.rows[0].branch_id,
         details: {
           previous_plan_id: currentMember.plan_id,
           previous_plan_name: previousPlanName,
           plan_id: targetPlanId,
           plan_name: planResult.rows[0].name,
           start_date: targetStartDate,
+          branch_id: updatedMember.rows[0].branch_id,
           end_date,
           payment_amount: payment ? parseFloat(payment.amount) : 0,
           payment_method: payment?.method ?? null,
@@ -1348,9 +1354,12 @@ router.put('/:id', requireActiveSubscription, validateParams(idParamSchema), val
       [id, gym_id]
     );
 
-    const auditDetails = { name: updated.name, phone: updated.phone };
+    const auditDetails = {
+      name: updated.name,
+      phone: updated.phone,
+      branch_id: newBranchId ?? updated.branch_id ?? currentMember.branch_id,
+    };
     if (newBranchId !== currentMember.branch_id) {
-      auditDetails.branch_id = newBranchId;
       auditDetails.from_branch_id = currentMember.branch_id;
     }
     if (photo !== undefined && newPhotoUrl !== currentMember.photo_url) {
@@ -1363,6 +1372,7 @@ router.put('/:id', requireActiveSubscription, validateParams(idParamSchema), val
       entityType: 'member',
       entityId: updated.id,
       entityLabel: updated.name,
+      branchId: auditDetails.branch_id,
       details: auditDetails,
     });
     res.json(enriched.rows[0] || updated);
@@ -1403,6 +1413,8 @@ router.delete('/:id', requireGymOwner, requireActiveSubscription, validateParams
       entityType: 'member',
       entityId: deleted.id,
       entityLabel: deleted.name,
+      branchId: deleted.branch_id,
+      details: { branch_id: deleted.branch_id },
     });
     res.json({ message: 'Member removed from the roster. Payment history is kept.' });
   } catch (error) {
@@ -1459,6 +1471,8 @@ router.post(
         entityType: 'member',
         entityId: restored.id,
         entityLabel: restored.name,
+        branchId: restored.branch_id,
+        details: { branch_id: restored.branch_id },
       });
 
       res.json(enriched.rows[0] || restored);

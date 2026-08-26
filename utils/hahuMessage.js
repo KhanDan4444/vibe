@@ -71,11 +71,28 @@ async function sendSms(to, message) {
     throw err;
   }
 
+  // hahu returns JSON { status: 200, message, data } on success — reject soft failures.
+  if (body && typeof body === 'object' && body.status != null) {
+    const code = Number(body.status);
+    const ok =
+      code === 200 ||
+      String(body.status).toLowerCase() === 'success' ||
+      String(body.status).toLowerCase() === 'ok';
+    if (!ok) {
+      const msg =
+        (typeof body.message === 'string' && body.message) ||
+        `hahu.io SMS failed (status ${body.status})`;
+      const err = new Error(msg);
+      err.statusCode = 502;
+      throw err;
+    }
+  }
+
   const data = body && typeof body === 'object' ? body.data || body : null;
   return {
-    message_id: data?.id || data?.message_id || body?.id || `hahu-${Date.now()}`,
+    message_id: String(data?.id || data?.message_id || body?.id || `hahu-${Date.now()}`),
     to,
-    status: data?.status || body?.status || 'queued',
+    status: 'sent',
     raw: body,
   };
 }

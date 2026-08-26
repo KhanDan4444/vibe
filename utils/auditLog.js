@@ -51,6 +51,7 @@ async function recordAuditLog({
   details = {},
   client = null,
   gymId = null,
+  branchId = null,
 }) {
   const user = req.user;
   const resolvedGymId = gymId ?? user?.gym_id;
@@ -58,6 +59,8 @@ async function recordAuditLog({
 
   const executor = client || db;
   const actorName = user?.name || user?.email || 'Unknown user';
+  const resolvedBranchId =
+    branchId ?? details?.branch_id ?? details?.to_branch_id ?? user?.branch_id ?? null;
 
   try {
     await executor.query(
@@ -70,7 +73,7 @@ async function recordAuditLog({
       `,
       [
         resolvedGymId,
-        details?.branch_id ?? user?.branch_id ?? null,
+        resolvedBranchId,
         user?.id ?? null,
         actorName,
         user?.email || null,

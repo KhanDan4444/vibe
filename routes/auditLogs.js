@@ -45,7 +45,8 @@ router.get('/', validateQuery(activityQuerySchema), async (req, res, next) => {
     const params = [gymId];
 
     if (scope.branchId) {
-      conditions.push(`a.branch_id = $${params.length + 1}`);
+      // Include unscoped rows (legacy owner actions with null branch_id).
+      conditions.push(`(a.branch_id = $${params.length + 1} OR a.branch_id IS NULL)`);
       params.push(scope.branchId);
     }
 
