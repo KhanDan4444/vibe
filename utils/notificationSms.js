@@ -199,10 +199,8 @@ async function smsMemberRenewed(member, gymName, endDate, opts = {}) {
     .split(/\s+/)
     .filter(Boolean)[0] || 'there';
   const ends = formatDisplayDateFromIso(endDate) || 'soon';
-  let message = `Hi ${firstName}, your membership at ${gymName} has been renewed. New term ends on ${ends}. Thank you!`;
-  if (opts.passUrl) {
-    message += `\n\nYour Check-in pass: ${opts.passUrl}`;
-  }
+  const message = `Hi ${firstName}, your membership at ${gymName} has been renewed. New term ends on ${ends}. Thank you!`;
+  // Pass links omitted for now — personal-SIM gateways flag URL SMS as spam.
   return deliverSms({
     to: member.phone,
     message,
@@ -228,10 +226,8 @@ async function smsMemberEnrolled(member, gymName, term = {}) {
     ? String(term.planName).trim().replace(/\s*·\s*/g, ' - ')
     : '';
   const planBit = planLabel ? `Your ${planLabel} membership plan` : 'Your membership';
-  let message = `Hi ${firstName}, welcome to ${gymName}. ${planBit} is active until ${ends}. We're glad to have you!`;
-  if (term.passUrl) {
-    message += `\n\nYour Check-in pass: ${term.passUrl}`;
-  }
+  const message = `Hi ${firstName}, welcome to ${gymName}. ${planBit} is active until ${ends}. We're glad to have you!`;
+  // Pass links omitted for now — personal-SIM gateways flag URL SMS as spam.
   return deliverSms({
     to: member.phone,
     message,
