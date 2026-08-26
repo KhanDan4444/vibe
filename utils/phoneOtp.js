@@ -5,7 +5,7 @@
 
 const crypto = require('crypto');
 const db = require('../config/db');
-const { sendOtp, otpTtlSeconds } = require('./afroMessage');
+const { sendOtp, otpTtlSeconds } = require('./smsProvider');
 const { normalizeEthiopianPhone } = require('./phone');
 const { logOtpSms } = require('./notificationSms');
 

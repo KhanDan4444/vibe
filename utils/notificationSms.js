@@ -5,7 +5,7 @@
 
 const db = require('../config/db');
 const { formatDisplayDateFromIso } = require('./localDate');
-const { sendSms, isSmsConfigured } = require('./afroMessage');
+const { sendSms, isSmsConfigured } = require('./smsProvider');
 const { normalizeEthiopianPhone } = require('./phone');
 const { ROLES } = require('./roles');
 const { SMS_BRAND } = require('./brand');

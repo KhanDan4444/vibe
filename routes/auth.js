@@ -47,7 +47,7 @@ const {
   changePasswordSchema,
 } = require('../validation/schemas');
 const { sendEmail } = require('../utils/email');
-const { verifyOtp } = require('../utils/afroMessage');
+const { verifyOtp } = require('../utils/smsProvider');
 const {
   PURPOSE,
   startPhoneOtpSession,
