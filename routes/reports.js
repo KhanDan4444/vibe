@@ -33,7 +33,16 @@ router.use(auth, checkSubscription, requireGymAccess);
 const MEMBER_IS_UNPAID = `
   NOT EXISTS (
     SELECT 1 FROM Payments pay
-    WHERE pay.member_id = m.id AND pay.gym_id = m.gym_id AND pay.date >= m.start_date
+    WHERE pay.member_id = m.id AND pay.gym_id = m.gym_id
+      AND COALESCE(pay.source, 'collect') <> 'trainer'
+      AND (
+        pay.date >= m.start_date
+        OR (
+          pay.source = 'renew'
+          AND pay.date < m.start_date
+          AND pay.date >= (m.start_date - INTERVAL '7 days')
+        )
+      )
   )
 `;
 

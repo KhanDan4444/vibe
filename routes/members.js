@@ -45,6 +45,7 @@ const {
   minimumRenewStartDate,
   calendarDateString,
   validatePaymentDate,
+  validateRenewPaymentDate,
 } = require('../utils/memberPayments');
 const { validatePlanPaymentAmount } = require('../utils/paymentValidation');
 const {
@@ -873,7 +874,7 @@ router.post('/:id/renew', requireActiveSubscription, validateParams(idParamSchem
     const end_date = calculateEndDate(targetStartDate, planResult.rows[0].duration);
     const status = deriveMemberStatusFromEndDate(end_date);
 
-    const paymentDateCheck = validatePaymentDate(date || todayLocalString(), targetStartDate);
+    const paymentDateCheck = validateRenewPaymentDate(date || todayLocalString(), targetStartDate);
     if (!paymentDateCheck.ok) {
       await client.query('ROLLBACK');
       return res.status(400).json({ error: paymentDateCheck.error });

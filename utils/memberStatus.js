@@ -12,7 +12,7 @@ const MEMBER_STATUS = {
 /** Days before end_date when a member is flagged due soon (chips / filters / counts). */
 const DUE_SOON_DAYS = 7;
 
-/** Dashboard Needs attention list + urgent due-soon inbox window. */
+/** Dashboard Needs attention + member due-soon SMS window. */
 const ATTENTION_DUE_SOON_DAYS = 3;
 
 /** Gym SaaS license due-soon window (platform admin). */

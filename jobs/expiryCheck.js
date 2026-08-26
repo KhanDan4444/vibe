@@ -4,7 +4,7 @@
  */
 
 const db = require('../config/db');
-const { MEMBER_STATUS, MEMBER_STATUS_CASE_SQL, DUE_SOON_DAYS } = require('../utils/memberStatus');
+const { MEMBER_STATUS, MEMBER_STATUS_CASE_SQL, ATTENTION_DUE_SOON_DAYS } = require('../utils/memberStatus');
 const {
   smsMemberDueSoon,
   smsMemberExpiresToday,
@@ -145,19 +145,20 @@ async function runDailyExpiryCheck() {
       }
     }
 
+    // Due-soon SMS at ≤3 days left (not the 7-day status chip window — that was too naggy).
     const expiringSoonQuery = `
       SELECT m.id, m.name, m.phone, m.gym_id, m.end_date
       FROM Members m
       WHERE m.deleted_at IS NULL
         AND m.end_date > CURRENT_DATE
-        AND m.end_date <= CURRENT_DATE + INTERVAL '${DUE_SOON_DAYS} days'
+        AND m.end_date <= CURRENT_DATE + INTERVAL '${ATTENTION_DUE_SOON_DAYS} days'
         AND LOWER(m.status) IN ($1, $2)
         AND NOT EXISTS (
           SELECT 1 FROM SmsLog s
           WHERE s.message_type = 'member_due_soon'
             AND s.entity_type = 'member'
             AND s.entity_id = m.id
-            AND (s.sent_at AT TIME ZONE 'UTC')::date >= m.end_date - INTERVAL '${DUE_SOON_DAYS} days'
+            AND (s.sent_at AT TIME ZONE 'UTC')::date >= m.end_date - INTERVAL '${ATTENTION_DUE_SOON_DAYS} days'
         );
     `;
     const soonResult = await db.query(expiringSoonQuery, [

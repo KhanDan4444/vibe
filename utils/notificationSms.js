@@ -152,7 +152,7 @@ async function getGymOwnerContact(gymId) {
 async function smsMemberDueSoon(member, gymName) {
   if (!member.phone) return { ok: false, error: 'no_phone' };
   const endDate = formatDisplayDateFromIso(member.end_date) || 'soon';
-  const message = `Hi ${member.name}, your membership at ${gymName} ends on ${endDate}. Please visit the gym to renew.`;
+  const message = `Hi ${member.name}, your membership at ${gymName} ends on ${endDate}.`;
   return deliverSms({
     to: member.phone,
     message,

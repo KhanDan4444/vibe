@@ -2,11 +2,13 @@
  * Payment helpers scoped to a member's current membership term.
  * A term is identified by start_date — renew/enroll updates start_date, so
  * payments on or after start_date belong to the current term.
+ * Renew may also be prepaid up to 7 days before a future start_date.
  */
 
 const { formatLocalDate, parseLocalDate, todayLocalString, calendarDateString } = require('./localDate');
 const {
   validatePaymentDate: validatePaymentDateShared,
+  validateRenewPaymentDate: validateRenewPaymentDateShared,
   normalizeIso,
 } = require('../shared/paymentDateRules');
 
@@ -29,15 +31,36 @@ function validatePaymentDate(paymentDateStr, termStartDateStr) {
   );
 }
 
+/** Renew: allow prepaid payment when new term start is still in the future. */
+function validateRenewPaymentDate(paymentDateStr, termStartDateStr) {
+  return validateRenewPaymentDateShared(
+    toCalendarDate(paymentDateStr) || paymentDateStr,
+    toCalendarDate(termStartDateStr) || termStartDateStr,
+    todayLocalString()
+  );
+}
+
 /**
  * @param {string} startDate - Member start_date (YYYY-MM-DD)
- * @param {Array<{ date: string }>} payments - Payment rows for this member
+ * @param {Array<{ date: string, source?: string }>} payments - Payment rows for this member
  * @returns {boolean}
  */
 function hasPaymentForTermStart(startDate, payments) {
   if (!startDate || !Array.isArray(payments)) return false;
   const termStart = String(startDate).split('T')[0];
-  return payments.some((p) => p.date && String(p.date).split('T')[0] >= termStart);
+  return payments.some((p) => {
+    if (!p.date || (p.source || 'collect') === 'trainer') return false;
+    const day = String(p.date).split('T')[0];
+    if (day >= termStart) return true;
+    if (p.source === 'renew' && day < termStart) {
+      const start = parseLocalDate(termStart);
+      if (!start) return false;
+      const prepaidFrom = new Date(start);
+      prepaidFrom.setDate(prepaidFrom.getDate() - 7);
+      return day >= formatLocalDate(prepaidFrom);
+    }
+    return false;
+  });
 }
 
 /** SQL EXISTS — matches MEMBER_UNPAID_SQL / list is_unpaid. */
@@ -47,8 +70,16 @@ async function queryMemberPaidForCurrentTerm(dbOrClient, memberId, gymId) {
     SELECT EXISTS (
       SELECT 1 FROM Payments p
       JOIN Members m ON m.id = p.member_id AND m.gym_id = p.gym_id
-      WHERE m.id = $1 AND m.gym_id = $2 AND p.date >= m.start_date
+      WHERE m.id = $1 AND m.gym_id = $2
         AND COALESCE(p.source, 'collect') <> 'trainer'
+        AND (
+          p.date >= m.start_date
+          OR (
+            p.source = 'renew'
+            AND p.date < m.start_date
+            AND p.date >= (m.start_date - INTERVAL '7 days')
+          )
+        )
     ) AS ok
     `,
     [memberId, gymId]
@@ -56,15 +87,23 @@ async function queryMemberPaidForCurrentTerm(dbOrClient, memberId, gymId) {
   return Boolean(result.rows[0]?.ok);
 }
 
-/** SQL EXISTS — payment on or after a specific term start date. */
+/** SQL EXISTS — payment on or after a specific term start date (incl. prepaid renew). */
 async function queryHasPaymentForTermStart(dbOrClient, memberId, gymId, termStartDate) {
   const termStart = String(termStartDate).split('T')[0];
   const result = await dbOrClient.query(
     `
     SELECT EXISTS (
       SELECT 1 FROM Payments
-      WHERE member_id = $1 AND gym_id = $2 AND date >= $3::date
+      WHERE member_id = $1 AND gym_id = $2
         AND COALESCE(source, 'collect') <> 'trainer'
+        AND (
+          date >= $3::date
+          OR (
+            source = 'renew'
+            AND date < $3::date
+            AND date >= ($3::date - INTERVAL '7 days')
+          )
+        )
     ) AS ok
     `,
     [memberId, gymId, termStart]
@@ -115,8 +154,16 @@ async function queryHasPaidTermStartingOn(dbOrClient, memberId, gymId, termStart
       WHERE m.id = $1 AND m.gym_id = $2 AND m.start_date::date = $3::date
         AND EXISTS (
           SELECT 1 FROM Payments p
-          WHERE p.member_id = m.id AND p.gym_id = m.gym_id AND p.date >= m.start_date
+          WHERE p.member_id = m.id AND p.gym_id = m.gym_id
             AND COALESCE(p.source, 'collect') <> 'trainer'
+            AND (
+              p.date >= m.start_date
+              OR (
+                p.source = 'renew'
+                AND p.date < m.start_date
+                AND p.date >= (m.start_date - INTERVAL '7 days')
+              )
+            )
         )
     ) AS ok
     `,
@@ -165,4 +212,5 @@ module.exports = {
   minimumRenewStartDate,
   calendarDateString: toCalendarDate,
   validatePaymentDate,
+  validateRenewPaymentDate,
 };

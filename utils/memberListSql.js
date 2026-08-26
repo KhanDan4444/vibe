@@ -1,11 +1,22 @@
 const { DUE_SOON_DAYS, MEMBER_STATUS, normalizeMemberStatus } = require('./memberStatus');
 
-/** Membership payments only — trainer fees do not mark a term as paid. */
+/** Membership payments only — trainer fees do not mark a term as paid.
+ * Renew may be prepaid up to 7 days before the new term start (pay on expiry day
+ * while the next term starts the day after).
+ */
 const MEMBER_TERM_PAYMENT_EXISTS_SQL = `
   EXISTS (
     SELECT 1 FROM Payments p
-    WHERE p.member_id = m.id AND p.gym_id = m.gym_id AND p.date >= m.start_date
+    WHERE p.member_id = m.id AND p.gym_id = m.gym_id
       AND COALESCE(p.source, 'collect') <> 'trainer'
+      AND (
+        p.date >= m.start_date
+        OR (
+          p.source = 'renew'
+          AND p.date < m.start_date
+          AND p.date >= (m.start_date - INTERVAL '7 days')
+        )
+      )
   )
 `;
 
