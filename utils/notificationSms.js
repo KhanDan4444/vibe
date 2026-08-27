@@ -226,7 +226,7 @@ async function smsMemberEnrolled(member, gymName, term = {}) {
     ? String(term.planName).trim().replace(/\s*·\s*/g, ' - ')
     : '';
   const planBit = planLabel ? `Your ${planLabel} membership plan` : 'Your membership';
-  const message = `Hi ${firstName}, welcome to ${gymName}. ${planBit} is active until ${ends}. We're glad to have you!`;
+  const message = `Hi ${firstName}, welcome to ${gymName}. ${planBit} is active until ${ends}. We are glad to have you!`;
   // Pass links omitted for now — personal-SIM gateways flag URL SMS as spam.
   return deliverSms({
     to: member.phone,
