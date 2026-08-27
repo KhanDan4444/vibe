@@ -83,6 +83,9 @@ function buildMemberListFilters(query, startParamIndex = 2, options = {}) {
     conditions.push(`(${statusWhereSql(MEMBER_STATUS.DUE_SOON)})`);
   } else if (filter === 'expired') {
     conditions.push(`(${statusWhereSql(MEMBER_STATUS.EXPIRED)})`);
+  } else if (filter === 'new') {
+    // Same definition as dashboard newMembersThisMonth (current term started this month).
+    conditions.push(`date_trunc('month', m.start_date) = date_trunc('month', CURRENT_DATE)`);
   } else if (status) {
     const statusCondition = statusWhereSql(status);
     if (statusCondition) {

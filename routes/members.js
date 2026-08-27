@@ -305,7 +305,7 @@ router.post('/enroll', requireActiveSubscription, validateBody(enrollMemberSchem
  * @queryparam {Number} [limit=50]
  * @queryparam {String} [search] - Name or phone
  * @queryparam {String} [status] - Active, Expired, Due Soon
- * @queryparam {String} [filter] - due_soon | expired | unpaid
+ * @queryparam {String} [filter] - due_soon | expired | unpaid | new
  */
 router.get('/', validateQuery(memberListQuerySchema), async (req, res, next) => {
   const gym_id = req.user.gym_id;
