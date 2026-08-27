@@ -10,7 +10,7 @@ const auth = require('../middleware/auth');
 const checkSubscription = require('../middleware/subscriptionCheck');
 const requireGymAccess = require('../middleware/requireGymAccess');
 const requireGymOwner = require('../middleware/requireGymOwner');
-const { MEMBER_UNPAID_SQL, MEMBER_LIVE_SQL, MEMBER_LIVE_BARE_SQL } = require('../utils/memberListSql');
+const { MEMBER_UNPAID_SQL, MEMBER_LIVE_SQL, MEMBER_LIVE_BARE_SQL, MEMBER_NO_VISIT_WEEK_SQL } = require('../utils/memberListSql');
 const { DUE_SOON_DAYS, ATTENTION_DUE_SOON_DAYS, canRenewOnDate } = require('../utils/memberStatus');
 const { computePercentChange, computeCountDelta } = require('../utils/periodComparison');
 const { resolveBranchScope, gymBranchParams } = require('../utils/branchScope');
@@ -58,6 +58,7 @@ router.get('/', async (req, res, next) => {
       previousIncomeRes,
       newMembersThisMonthRes,
       newMembersLastMonthRes,
+      inactiveMembersThisWeekRes,
       alertMembersRes,
       revenueChartRes,
       unpaidAlertsRes,
@@ -119,6 +120,11 @@ router.get('/', async (req, res, next) => {
         WHERE gym_id = $1${mb}${MEMBER_LIVE_BARE_SQL}
           AND date_trunc('month', start_date) = date_trunc('month', CURRENT_DATE - INTERVAL '1 month')
         `,
+        qp
+      ),
+      db.query(
+        `SELECT COUNT(*)::int AS count FROM Members m WHERE m.gym_id = $1${ma}${MEMBER_LIVE_SQL}
+          AND (${MEMBER_NO_VISIT_WEEK_SQL})`,
         qp
       ),
       db.query(
@@ -332,6 +338,7 @@ router.get('/', async (req, res, next) => {
       newMembersLastMonth,
       newMembersTrendPercent: computePercentChange(newMembersThisMonth, newMembersLastMonth),
       newMembersDeltaLabel: computeCountDelta(newMembersThisMonth, newMembersLastMonth),
+      inactiveMembersThisWeek: inactiveMembersThisWeekRes.rows[0].count,
       alertMembers: alertMembersRes.rows,
       revenueChart: revenueChartRes.rows.map((r) => ({
         date: r.day,

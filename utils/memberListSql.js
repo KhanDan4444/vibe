@@ -35,6 +35,22 @@ const MEMBER_IS_UNPAID_SELECT = `
 const MEMBER_LIVE_SQL = ' AND m.deleted_at IS NULL';
 const MEMBER_LIVE_BARE_SQL = ' AND deleted_at IS NULL';
 
+/**
+ * At-risk / quiet members: still on a current term, enrolled long enough to judge,
+ * and no desk check-in in the last 7 days (rolling — does not reset on Monday).
+ * Includes never checked in (after the 7-day grace from term start).
+ */
+const MEMBER_NO_VISIT_WEEK_SQL = `
+  m.end_date >= CURRENT_DATE
+  AND m.start_date <= (CURRENT_DATE - INTERVAL '7 days')
+  AND NOT EXISTS (
+    SELECT 1 FROM CheckIns c
+    WHERE c.member_id = m.id
+      AND c.gym_id = m.gym_id
+      AND c.checked_in_at >= (CURRENT_TIMESTAMP - INTERVAL '7 days')
+  )
+`;
+
 const MEMBER_LIST_FROM = `
   FROM Members m
   LEFT JOIN Plans p ON p.id = m.plan_id
@@ -42,7 +58,21 @@ const MEMBER_LIST_FROM = `
   LEFT JOIN Trainers tr ON tr.id = m.trainer_id
 `;
 
-const MEMBER_LIST_SELECT = `m.*, p.name AS plan_name, b.name AS branch_name, tr.name AS trainer_name, ${MEMBER_IS_UNPAID_SELECT}`;
+/** Calendar days since last desk check-in (or since term start if never checked in). */
+const MEMBER_DAYS_WITHOUT_VISIT_SELECT = `
+  (
+    CURRENT_DATE - COALESCE(
+      (
+        SELECT MAX(c.checked_in_at)::date
+        FROM CheckIns c
+        WHERE c.member_id = m.id AND c.gym_id = m.gym_id
+      ),
+      m.start_date
+    )
+  )::int AS days_without_visit
+`;
+
+const MEMBER_LIST_SELECT = `m.*, p.name AS plan_name, b.name AS branch_name, tr.name AS trainer_name, ${MEMBER_IS_UNPAID_SELECT}, ${MEMBER_DAYS_WITHOUT_VISIT_SELECT}`;
 
 function statusWhereSql(status) {
   const normalized = normalizeMemberStatus(status);
@@ -86,6 +116,8 @@ function buildMemberListFilters(query, startParamIndex = 2, options = {}) {
   } else if (filter === 'new') {
     // Same definition as dashboard newMembersThisMonth (current term started this month).
     conditions.push(`date_trunc('month', m.start_date) = date_trunc('month', CURRENT_DATE)`);
+  } else if (filter === 'inactive_week') {
+    conditions.push(`(${MEMBER_NO_VISIT_WEEK_SQL})`);
   } else if (status) {
     const statusCondition = statusWhereSql(status);
     if (statusCondition) {
@@ -154,6 +186,7 @@ module.exports = {
   MEMBER_IS_UNPAID_SELECT,
   MEMBER_LIVE_SQL,
   MEMBER_LIVE_BARE_SQL,
+  MEMBER_NO_VISIT_WEEK_SQL,
   MEMBER_LIST_FROM,
   MEMBER_LIST_SELECT,
   buildMemberListFilters,
