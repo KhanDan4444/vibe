@@ -44,6 +44,7 @@ const {
 const { validatePlanPaymentAmount } = require('../utils/paymentValidation');
 const { PAYMENT_SOURCES } = require('../utils/paymentSources');
 const { smsGymLicenseRenewed } = require('../utils/notificationSms');
+const { parseSmsPhoneFilter } = require('../utils/phone');
 const { validateBody, validateParams, validateQuery } = require('../middleware/validate');
 const {
   adminGymListQuerySchema,
@@ -1098,11 +1099,13 @@ const ADMIN_SMS_TYPES = [...GYM_LICENSE_SMS_TYPES, ...OTP_SMS_TYPES];
  * @queryparam {number} [limit=10]
  * @queryparam {string} [type] - gym_license_* | otp_* | all
  * @queryparam {number} [gym_id] - filter license reminders by gym (OTP rows excluded)
+ * @queryparam {string} [phone] - filter by recipient phone (full number or partial digits)
  */
 router.get('/gym-sms', validateQuery(adminGymSmsQuerySchema), async (req, res, next) => {
   const { page, limit, offset } = parsePaginationQuery(req.query);
   const typeFilter = String(req.query.type || 'all').toLowerCase();
   const gymId = req.query.gym_id;
+  const phoneFilter = parseSmsPhoneFilter(req.query.phone);
 
   try {
     let allowedTypes = ADMIN_SMS_TYPES;
@@ -1119,6 +1122,14 @@ router.get('/gym-sms', validateQuery(adminGymSmsQuerySchema), async (req, res, n
         OR (g_phone.id = $${params.length + 1})
       )`);
       params.push(gymId);
+    }
+
+    if (phoneFilter?.match === 'exact') {
+      conditions.push(`s.recipient_phone = $${params.length + 1}`);
+      params.push(phoneFilter.value);
+    } else if (phoneFilter?.match === 'partial') {
+      conditions.push(`REPLACE(s.recipient_phone, '+', '') LIKE $${params.length + 1}`);
+      params.push(`%${phoneFilter.digits}%`);
     }
 
     const whereClause = conditions.join(' AND ');

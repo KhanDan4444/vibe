@@ -26,7 +26,27 @@ function isValidEthiopianPhone(input) {
   return normalizeEthiopianPhone(input) != null;
 }
 
+/**
+ * Parse admin SMS log phone filter: full numbers match E.164 exactly;
+ * partial digit strings (4+) match as substring on recipient_phone.
+ * @param {string|null|undefined} input
+ * @returns {{ match: 'exact', value: string } | { match: 'partial', digits: string } | null}
+ */
+function parseSmsPhoneFilter(input) {
+  const trimmed = String(input || '').trim();
+  if (!trimmed) return null;
+
+  const normalized = normalizeEthiopianPhone(trimmed);
+  if (normalized) return { match: 'exact', value: normalized };
+
+  const digits = trimmed.replace(/\D/g, '');
+  if (digits.length >= 4) return { match: 'partial', digits };
+
+  return null;
+}
+
 module.exports = {
   normalizeEthiopianPhone,
   isValidEthiopianPhone,
+  parseSmsPhoneFilter,
 };

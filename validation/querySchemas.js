@@ -114,6 +114,7 @@ const adminGymSmsQuerySchema = paginationQuerySchema.extend({
     z.enum(ADMIN_SMS_TYPE_VALUES)
   ),
   gym_id: optionalPositiveIntQuery,
+  phone: z.preprocess(emptyToUndefined, z.string().trim().max(20).optional()),
 });
 
 const memberSmsQuerySchema = paginationQuerySchema.extend({
