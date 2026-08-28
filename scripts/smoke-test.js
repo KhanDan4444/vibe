@@ -5,6 +5,9 @@
  */
 require('dotenv').config({ path: require('path').join(__dirname, '..', '.env') });
 
+const db = require('../config/db');
+const { runOtpDedupSmoke } = require('./otpDedupSmoke');
+
 const BASE = `http://localhost:${process.env.PORT || 5000}/api`;
 
 async function request(method, path, body, token) {
@@ -73,6 +76,15 @@ function dayAfter(dateStr) {
   return d.toISOString().split('T')[0];
 }
 
+async function testGymSignupOtpDedup() {
+  console.log('\nGym signup OTP dedup');
+  if (process.env.PUBLIC_GYM_SIGNUP_ENABLED === '0') {
+    console.log('  ⚠ Skipping gym signup OTP dedup test (PUBLIC_GYM_SIGNUP_ENABLED=0)');
+    return;
+  }
+  await runOtpDedupSmoke({ assert, db });
+}
+
 async function main() {
   console.log('Smoke test →', BASE);
 
@@ -87,6 +99,8 @@ async function main() {
   const health = await request('GET', '/health');
   assert('Health endpoint', health.ok);
   assert('Health reports DB connected', health.data.db === 'connected');
+
+  await testGymSignupOtpDedup();
 
   const adminDash = await request('GET', '/admin/dashboard', null, adminToken);
   assert('Admin dashboard', adminDash.ok);
@@ -351,7 +365,11 @@ async function main() {
     const staffCreateTrainer = await request(
       'POST',
       '/gym/trainers',
-      { name: 'Should Fail', branch_id: activeBranches[0]?.id },
+      {
+        name: 'Should Fail',
+        phone: '0911111111',
+        branch_id: activeBranches[0]?.id,
+      },
       helpdeskToken
     );
     assert('Front Desk cannot create trainers', !staffCreateTrainer.ok && staffCreateTrainer.status === 403);
@@ -360,10 +378,16 @@ async function main() {
   const branchForTrainer = activeBranches[0];
   if (branchForTrainer && planList[0]) {
     const trainerName = `Smoke Trainer ${Date.now()}`;
+    const trainerPhoneSuffix = String(Date.now()).slice(-7);
     const createdTrainer = await request(
       'POST',
       '/gym/trainers',
-      { name: trainerName, branch_id: branchForTrainer.id, specialty: 'PT' },
+      {
+        name: trainerName,
+        phone: `092${trainerPhoneSuffix}`,
+        branch_id: branchForTrainer.id,
+        specialty: 'PT',
+      },
       ownerToken
     );
     assert('Create trainer', createdTrainer.ok, createdTrainer.data.error);

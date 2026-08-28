@@ -8,6 +8,7 @@
     "stop": "fuser -k 5000/tcp 2>/dev/null || true",
     "db:migrate": "node scripts/migrate.js",
     "smoke:test": "node scripts/smoke-test.js",
+    "smoke:test:otp": "node scripts/smoke-test-otp.js",
     "start:legacy": "node index.js",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
