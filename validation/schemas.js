@@ -367,7 +367,8 @@ const gymSignupCompleteSchema = z.object({
   username,
   password,
   phone: ethiopianPhone,
-  saas_plan_id: positiveInt,
+  city: trimmed(100),
+  address: optionalTrimmed(500),
 });
 
 const resetPasswordSchema = z.object({

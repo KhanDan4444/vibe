@@ -19,7 +19,7 @@ const paymentSortSchema = z.enum(['date_desc', 'date_asc', 'name_asc', 'name_des
 
 const memberFilterSchema = z.enum(['unpaid', 'due_soon', 'expired', 'new', 'inactive_week']).optional();
 
-const gymFilterSchema = z.enum(['unpaid', 'due_soon', 'expired', 'needs_renewal']).optional();
+const gymFilterSchema = z.enum(['unpaid', 'due_soon', 'trial_ending', 'expired', 'needs_renewal']).optional();
 
 const subscriptionStatusQuerySchema = z
   .enum(['active', 'suspended', 'expired', 'Active', 'Suspended', 'Expired', 'All'])
@@ -91,6 +91,9 @@ const ADMIN_SMS_TYPE_VALUES = [
   'gym_license_expires_today',
   'gym_license_expired',
   'gym_license_renewed',
+  'gym_trial_due_in_3_days',
+  'gym_trial_expires_today',
+  'gym_trial_expired',
   'otp_forgot_password',
   'otp_gym_signup',
 ];

@@ -1,6 +1,6 @@
 /**
- * @file jobs/expiryCheck.js
- * @description Daily membership and gym SaaS license expiry checks with SMS alerts.
+ * @file expiryCheck.js
+ * @description Daily membership and gym SaaS license expiry checks with SMS + email alerts.
  */
 
 const db = require('../config/db');
@@ -13,7 +13,14 @@ const {
   smsGymLicenseExpiresToday,
   smsGymLicenseExpired,
   getGymOwnerContact,
+  logSms,
 } = require('../utils/notificationSms');
+const {
+  emailGymOwnerLicenseAlert,
+  emailPlatformAdminsTrialsEndingAlert,
+} = require('../utils/notificationEmail');
+const { isTrialSubscription, GS_IS_TRIAL_SQL } = require('../utils/gymTrial');
+const { formatDisplayDateFromIso } = require('../utils/localDate');
 
 const GYM_STATUS = {
   ACTIVE: 'active',
@@ -30,6 +37,90 @@ function groupMembersByGym(rows) {
   return map;
 }
 
+async function wasPlatformDigestSentToday(messageType) {
+  const result = await db.query(
+    `
+    SELECT 1 FROM SmsLog
+    WHERE message_type = $1
+      AND entity_type = 'platform'
+      AND entity_id = 0
+      AND (sent_at AT TIME ZONE 'UTC')::date = (CURRENT_TIMESTAMP AT TIME ZONE 'UTC')::date
+    LIMIT 1
+    `,
+    [messageType]
+  );
+  return result.rows.length > 0;
+}
+
+async function logPlatformDigest(messageType) {
+  await logSms({
+    recipientPhone: 'platform-digest',
+    messageType,
+    entityType: 'platform',
+    entityId: 0,
+    messageId: 'email',
+  });
+}
+
+async function notifyGymLicenseDueIn3Days(gym) {
+  await smsGymLicenseDueIn3Days(gym, gym.end_date, gym.plan);
+  const isTrial = isTrialSubscription(gym);
+  const endDisplay = formatDisplayDateFromIso(gym.end_date);
+  await emailGymOwnerLicenseAlert(
+    gym,
+    isTrial ? 'Free trial ending in 3 days' : 'Platform license ending in 3 days',
+    isTrial
+      ? [
+          `Your free trial ends in 3 days (${endDisplay}).`,
+          'Subscribe through your platform admin before the trial ends to keep full access.',
+        ]
+      : [
+          `Your platform license (${gym.plan || 'plan'}) ends in 3 days (${endDisplay}).`,
+          'Renew with your platform administrator to avoid interruption.',
+        ],
+    { isTrial }
+  );
+}
+
+async function notifyGymLicenseExpiresToday(gym) {
+  await smsGymLicenseExpiresToday(gym);
+  const isTrial = isTrialSubscription(gym);
+  await emailGymOwnerLicenseAlert(
+    gym,
+    isTrial ? 'Free trial ends today' : 'Platform license expires today',
+    isTrial
+      ? [
+          'Your free trial ends today.',
+          'Contact your platform admin to subscribe before your portal access is paused.',
+        ]
+      : [
+          'Your platform license expires today.',
+          'Renew now to avoid interruption to your gym portal.',
+        ],
+    { isTrial }
+  );
+}
+
+async function notifyGymLicenseExpired(gym) {
+  const endDisplay = formatDisplayDateFromIso(gym.end_date);
+  await smsGymLicenseExpired(gym, gym.end_date);
+  const isTrial = isTrialSubscription(gym);
+  await emailGymOwnerLicenseAlert(
+    gym,
+    isTrial ? 'Free trial ended' : 'Platform license expired',
+    isTrial
+      ? [
+          `Your free trial ended on ${endDisplay}.`,
+          'Subscribe through your platform admin to restore access to the portal.',
+        ]
+      : [
+          `Your platform license expired on ${endDisplay}.`,
+          'Contact your platform administrator to renew and restore access.',
+        ],
+    { isTrial }
+  );
+}
+
 async function runGymSaasExpiryCheck() {
   console.log('[Notification Engine] Running gym SaaS license check...');
 
@@ -41,7 +132,7 @@ async function runGymSaasExpiryCheck() {
       AND gs.end_date < CURRENT_DATE
       AND LOWER(g.subscription_status) = $2
       AND g.deleted_at IS NULL
-    RETURNING g.id, g.name, g.phone, gs.end_date;
+    RETURNING g.id, g.name, g.phone, gs.end_date, gs.plan, gs.saas_plan_id;
   `;
   const expiredGyms = await db.query(expireQuery, [GYM_STATUS.EXPIRED, GYM_STATUS.ACTIVE]);
 
@@ -62,12 +153,12 @@ async function runGymSaasExpiryCheck() {
     );
 
     for (const gym of expiredGyms.rows) {
-      await smsGymLicenseExpired(gym, gym.end_date);
+      await notifyGymLicenseExpired(gym);
     }
   }
 
   const dueIn3DaysQuery = `
-    SELECT g.id, g.name, g.phone, gs.end_date, gs.plan
+    SELECT g.id, g.name, g.phone, gs.end_date, gs.plan, gs.saas_plan_id
     FROM Gyms g
     JOIN GymSubscriptions gs ON gs.gym_id = g.id
     WHERE LOWER(g.subscription_status) = $1
@@ -79,11 +170,11 @@ async function runGymSaasExpiryCheck() {
     console.log(
       `[Notification Engine] Gym SaaS license due in 3 days: ${gym.name} (#${gym.id})`
     );
-    await smsGymLicenseDueIn3Days(gym, gym.end_date, gym.plan);
+    await notifyGymLicenseDueIn3Days(gym);
   }
 
   const expiringTodayQuery = `
-    SELECT g.id, g.name, g.phone, gs.end_date
+    SELECT g.id, g.name, g.phone, gs.end_date, gs.plan, gs.saas_plan_id
     FROM Gyms g
     JOIN GymSubscriptions gs ON gs.gym_id = g.id
     WHERE LOWER(g.subscription_status) = $1
@@ -93,7 +184,38 @@ async function runGymSaasExpiryCheck() {
   const today = await db.query(expiringTodayQuery, [GYM_STATUS.ACTIVE]);
   for (const gym of today.rows) {
     console.log(`[Notification Engine] Gym SaaS license expires today: ${gym.name}`);
-    await smsGymLicenseExpiresToday(gym);
+    await notifyGymLicenseExpiresToday(gym);
+  }
+
+  const trialsEndingQuery = `
+    SELECT g.id, g.name, g.owner_name, g.city, gs.end_date
+    FROM Gyms g
+    JOIN GymSubscriptions gs ON gs.gym_id = g.id
+    WHERE LOWER(g.subscription_status) = $1
+      AND g.deleted_at IS NULL
+      AND ${GS_IS_TRIAL_SQL}
+      AND gs.end_date::date BETWEEN CURRENT_DATE AND (CURRENT_DATE + INTERVAL '7 days')
+    ORDER BY gs.end_date ASC, g.name ASC;
+  `;
+  const trialsEnding = await db.query(trialsEndingQuery, [GYM_STATUS.ACTIVE]);
+  if (
+    trialsEnding.rows.length > 0 &&
+    !(await wasPlatformDigestSentToday('gym_trial_admin_digest'))
+  ) {
+    try {
+      await emailPlatformAdminsTrialsEndingAlert(
+        trialsEnding.rows.map((row) => ({
+          ...row,
+          end_date: formatDisplayDateFromIso(row.end_date),
+        }))
+      );
+      await logPlatformDigest('gym_trial_admin_digest');
+      console.log(
+        `[Notification Engine] Admin digest: ${trialsEnding.rows.length} trial(s) ending within 7 days`
+      );
+    } catch (err) {
+      console.error('[Notification Engine] Admin trial digest email failed:', err.message);
+    }
   }
 }
 
@@ -145,7 +267,6 @@ async function runDailyExpiryCheck() {
       }
     }
 
-    // Due-soon SMS at ≤3 days left (not the 7-day status chip window — that was too naggy).
     const expiringSoonQuery = `
       SELECT m.id, m.name, m.phone, m.gym_id, m.end_date
       FROM Members m

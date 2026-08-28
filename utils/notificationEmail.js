@@ -65,9 +65,13 @@ async function emailGymOwnerMemberAlert(gymId, subject, intro, members) {
 /**
  * Notify gym owner about their SaaS license.
  */
-async function emailGymOwnerLicenseAlert(gym, subject, bodyLines) {
+async function emailGymOwnerLicenseAlert(gym, subject, bodyLines, { isTrial = false } = {}) {
   const owner = await getGymOwnerEmail(gym.id);
   if (!owner?.email) return;
+
+  const footer = isTrial
+    ? 'Contact your platform administrator to subscribe and continue using the portal.'
+    : 'Contact your platform administrator to renew your SaaS license.';
 
   const text = [
     `Hello ${owner.owner_name},`,
@@ -76,7 +80,7 @@ async function emailGymOwnerLicenseAlert(gym, subject, bodyLines) {
     '',
     `Gym: ${gym.name}`,
     '',
-    'Contact your platform administrator to renew your SaaS license.',
+    footer,
   ].join('\n');
 
   await sendEmail({
@@ -84,6 +88,41 @@ async function emailGymOwnerLicenseAlert(gym, subject, bodyLines) {
     subject: `[${gym.name}] ${subject}`,
     text,
   });
+}
+
+/**
+ * Daily digest for platform admins — free trials ending within the next week.
+ * @param {Array<{ id: number, name: string, owner_name?: string, end_date: string, city?: string }>} gyms
+ */
+async function emailPlatformAdminsTrialsEndingAlert(gyms) {
+  if (!gyms?.length) return;
+  const admins = await getPlatformAdminEmails();
+  if (admins.length === 0) return;
+
+  const lines = gyms.map(
+    (g) =>
+      `  • ${g.name}${g.city ? ` (${g.city})` : ''} — trial ends ${g.end_date}${
+        g.owner_name ? ` — ${g.owner_name}` : ''
+      }`
+  );
+
+  const text = [
+    'The following gyms are on a free trial and their access ends within 7 days:',
+    '',
+    ...lines,
+    '',
+    'Open the admin dashboard and use the “Trial ending” filter to renew them on a SaaS plan.',
+  ].join('\n');
+
+  await Promise.all(
+    admins.map((admin) =>
+      sendEmail({
+        to: admin.email,
+        subject: `[VibeSaaS] ${gyms.length} free trial(s) ending this week`,
+        text: `Hello ${admin.name},\n\n${text}`,
+      })
+    )
+  );
 }
 
 /**
@@ -125,5 +164,6 @@ module.exports = {
   emailGymOwnerMemberAlert,
   emailGymOwnerLicenseAlert,
   emailPlatformAdminsLicenseAlert,
+  emailPlatformAdminsTrialsEndingAlert,
   groupMembersByGym,
 };

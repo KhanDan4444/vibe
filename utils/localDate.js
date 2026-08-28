@@ -87,6 +87,17 @@ function formatDisplayDateFromIso(iso) {
   return `${d}-${m}-${y.slice(-2)}`;
 }
 
+/**
+ * @param {string | Date} dateStr YYYY-MM-DD (or Date)
+ * @param {number} days calendar days to add (may be negative)
+ * @returns {string} YYYY-MM-DD
+ */
+function addCalendarDays(dateStr, days) {
+  const d = parseLocalDate(dateStr);
+  d.setDate(d.getDate() + days);
+  return formatLocalDate(d);
+}
+
 module.exports = {
   DEFAULT_APP_TIMEZONE,
   formatLocalDate,
@@ -95,4 +106,5 @@ module.exports = {
   calendarDateString,
   parseLocalDate,
   formatDisplayDateFromIso,
+  addCalendarDays,
 };

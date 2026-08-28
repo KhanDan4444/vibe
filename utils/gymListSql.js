@@ -36,6 +36,7 @@ const GYM_IS_UNPAID_SELECT = `
 `;
 
 const { GYM_LICENSE_DUE_SOON_DAYS } = require('./memberStatus');
+const { GYM_TRIAL_ENDING_SQL } = require('./gymTrial');
 
 const GYM_DUE_SOON_SQL = `
   LOWER(g.subscription_status) = 'active'
@@ -74,6 +75,8 @@ function buildGymListFilters(query, startParamIndex = 1) {
     conditions.push(`(${GYM_UNPAID_SQL})`);
   } else if (filter === 'due_soon') {
     conditions.push(`(${GYM_DUE_SOON_SQL})`);
+  } else if (filter === 'trial_ending') {
+    conditions.push(`(${GYM_TRIAL_ENDING_SQL})`);
   } else if (filter === 'expired') {
     conditions.push(`(${GYM_EXPIRED_OR_SUSPENDED_SQL})`);
   } else if (filter === 'needs_renewal') {
@@ -109,6 +112,7 @@ module.exports = {
   GYM_DUE_SOON_SQL,
   GYM_EXPIRED_OR_SUSPENDED_SQL,
   GYM_NEEDS_RENEWAL_SQL,
+  GYM_TRIAL_ENDING_SQL,
   buildGymListFilters,
   getLiveGymRow,
 };

@@ -61,41 +61,60 @@ async function sendSms(to, message) {
   return afro.sendSms(to, message);
 }
 
+function buildOtpMessage(code, options = {}) {
+  const prefix = options.prefix || 'ንቁ: Your verification code is';
+  const postfix = options.postfix || '';
+  return `${prefix} ${code}${postfix}`.trim();
+}
+
+/** Hahu / dev-local OTP: generate code + verification id without sending SMS yet. */
+function createManagedOtp(to) {
+  const provider = resolveProvider();
+  if (provider === 'afro') return null;
+  const code = generateOtpCode();
+  const tag = provider === 'hahu' ? 'hahu' : 'local';
+  return {
+    code,
+    verificationId: `${tag}:${hashOtpCode(code, to)}`,
+    provider: tag,
+  };
+}
+
+/** Send SMS for a managed OTP created with createManagedOtp. */
+async function sendManagedOtp(to, managed, options = {}) {
+  const message = buildOtpMessage(managed.code, options);
+  if (managed.provider === 'hahu') {
+    const result = await hahu.sendSms(to, message);
+    return {
+      code: managed.code,
+      verificationId: managed.verificationId,
+      message_id: result.message_id,
+      to,
+      status: result.status || 'queued',
+    };
+  }
+  console.log(
+    `[SMS] (no provider — dev OTP)\nTo: ${to}\nCode: ${managed.code}\nVerificationId: ${managed.verificationId}\n---`
+  );
+  return {
+    code: managed.code,
+    verificationId: managed.verificationId,
+    message_id: managed.verificationId,
+    to,
+    status: 'dev-logged',
+  };
+}
+
 /**
  * Send OTP. Afro uses /challenge; hahu generates a local code and sends SMS.
+ * Prefer createManagedOtp + persist session + sendManagedOtp for hahu/dev to avoid SMS before DB write.
  */
 async function sendOtp(to, options = {}) {
   const provider = resolveProvider();
 
   if (provider === 'hahu' || provider == null) {
-    if (provider == null) {
-      const code = generateOtpCode();
-      const verificationId = `local:${hashOtpCode(code, to)}`;
-      console.log(
-        `[SMS] (no provider — dev OTP)\nTo: ${to}\nCode: ${code}\nVerificationId: ${verificationId}\n---`
-      );
-      return {
-        code,
-        verificationId,
-        message_id: verificationId,
-        to,
-        status: 'dev-logged',
-      };
-    }
-
-    const code = generateOtpCode();
-    const prefix = options.prefix || 'ንቁ: Your verification code is';
-    const postfix = options.postfix || '';
-    const message = `${prefix} ${code}${postfix}`.trim();
-    const result = await hahu.sendSms(to, message);
-    const verificationId = `hahu:${hashOtpCode(code, to)}`;
-    return {
-      code,
-      verificationId,
-      message_id: result.message_id,
-      to,
-      status: result.status || 'queued',
-    };
+    const managed = createManagedOtp(to);
+    return sendManagedOtp(to, managed, options);
   }
 
   return afro.sendOtp(to, options);
@@ -144,6 +163,8 @@ module.exports = {
   isSmsConfigured,
   sendSms,
   sendOtp,
+  createManagedOtp,
+  sendManagedOtp,
   verifyOtp,
   otpTtlSeconds,
 };

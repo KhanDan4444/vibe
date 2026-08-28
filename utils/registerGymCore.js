@@ -6,7 +6,7 @@
 const bcrypt = require('bcrypt');
 const { ROLES } = require('./roles');
 const { createDefaultBranch } = require('./branches');
-const { assignSaasPlanToGym } = require('./saasSubscription');
+const { assignSaasPlanToGym, assignTrialToGym } = require('./saasSubscription');
 const { todayLocalString } = require('./localDate');
 const { normalizeEthiopianPhone } = require('./phone');
 
@@ -22,14 +22,23 @@ async function registerGymWithOwner(client, data) {
     username,
     password,
     phone,
+    city,
+    address,
     saas_plan_id,
     start_date,
+    trial_days,
   } = data;
 
   const normalizedPhone = normalizeEthiopianPhone(phone);
   const gymResult = await client.query(
-    'INSERT INTO Gyms (name, owner_name, phone) VALUES ($1, $2, $3) RETURNING *',
-    [gym_name.trim(), owner_name.trim(), normalizedPhone]
+    'INSERT INTO Gyms (name, owner_name, phone, city, address) VALUES ($1, $2, $3, $4, $5) RETURNING *',
+    [
+      gym_name.trim(),
+      owner_name.trim(),
+      normalizedPhone,
+      city?.trim() || null,
+      address?.trim() || null,
+    ]
   );
   const gymId = gymResult.rows[0].id;
 
@@ -46,12 +55,21 @@ async function registerGymWithOwner(client, data) {
   );
 
   const licenseStart = start_date || todayLocalString();
-  const subscription = await assignSaasPlanToGym(
-    client,
-    gymId,
-    parseInt(saas_plan_id, 10),
-    licenseStart
-  );
+  let subscription;
+  if (trial_days != null && parseInt(trial_days, 10) > 0) {
+    subscription = await assignTrialToGym(client, gymId, trial_days, licenseStart);
+  } else if (saas_plan_id != null) {
+    subscription = await assignSaasPlanToGym(
+      client,
+      gymId,
+      parseInt(saas_plan_id, 10),
+      licenseStart
+    );
+  } else {
+    const err = new Error('A SaaS plan or trial duration is required.');
+    err.statusCode = 400;
+    throw err;
+  }
 
   return {
     gym: gymResult.rows[0],

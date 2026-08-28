@@ -10,6 +10,8 @@ CREATE TABLE IF NOT EXISTS Gyms (
     name VARCHAR(255) NOT NULL,
     owner_name VARCHAR(255) NOT NULL,
     phone VARCHAR(50),
+    city VARCHAR(100),
+    address TEXT,
     subscription_status VARCHAR(50) DEFAULT 'active', -- active, expired, suspended
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     deleted_at TIMESTAMPTZ,

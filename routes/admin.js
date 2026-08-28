@@ -34,6 +34,7 @@ const {
   GYM_UNPAID_SQL,
   GYM_IS_UNPAID_SELECT,
   GYM_DUE_SOON_SQL,
+  GYM_TRIAL_ENDING_SQL,
   GYM_NEEDS_RENEWAL_SQL,
   GYM_LIVE_SQL,
   GYM_ARCHIVED_SQL,
@@ -147,7 +148,7 @@ router.get('/gyms', validateQuery(adminGymListQuerySchema), async (req, res, nex
       listParams
     );
 
-    const [allCount, unpaidCount, activeCount, suspendedCount, expiredCount, dueSoonCount, needsRenewalCount, archivedCount] =
+    const [allCount, unpaidCount, activeCount, suspendedCount, expiredCount, dueSoonCount, trialEndingCount, needsRenewalCount, archivedCount] =
       await Promise.all([
       db.query(`SELECT COUNT(*)::int AS count FROM (${GYM_LIST_BASE}) g`),
       db.query(`SELECT COUNT(*)::int AS count FROM (${GYM_LIST_BASE}) g WHERE (${GYM_UNPAID_SQL})`),
@@ -155,6 +156,7 @@ router.get('/gyms', validateQuery(adminGymListQuerySchema), async (req, res, nex
       db.query(`SELECT COUNT(*)::int AS count FROM (${GYM_LIST_BASE}) g WHERE LOWER(g.subscription_status) = 'suspended'`),
       db.query(`SELECT COUNT(*)::int AS count FROM (${GYM_LIST_BASE}) g WHERE LOWER(g.subscription_status) = 'expired'`),
       db.query(`SELECT COUNT(*)::int AS count FROM (${GYM_LIST_BASE}) g WHERE (${GYM_DUE_SOON_SQL})`),
+      db.query(`SELECT COUNT(*)::int AS count FROM (${GYM_LIST_BASE}) g WHERE (${GYM_TRIAL_ENDING_SQL})`),
       db.query(`SELECT COUNT(*)::int AS count FROM (${GYM_LIST_BASE}) g WHERE (${GYM_NEEDS_RENEWAL_SQL})`),
       db.query(`SELECT COUNT(*)::int AS count FROM Gyms WHERE deleted_at IS NOT NULL`),
     ]);
@@ -169,6 +171,7 @@ router.get('/gyms', validateQuery(adminGymListQuerySchema), async (req, res, nex
           suspended: suspendedCount.rows[0].count,
           expired: expiredCount.rows[0].count,
           dueSoon: dueSoonCount.rows[0].count,
+          trialEnding: trialEndingCount.rows[0].count,
           needsRenewal: needsRenewalCount.rows[0].count,
         },
       })
@@ -938,6 +941,7 @@ router.get('/dashboard', async (req, res, next) => {
       avgUsersRes,
       mrrRes,
       dueSoonRes,
+      trialEndingRes,
       topGymsRes,
       saasIncomeThisMonthRes,
       saasIncomeLastMonthRes,
@@ -983,6 +987,16 @@ router.get('/dashboard', async (req, res, next) => {
       WHERE LOWER(g.subscription_status) = 'active'
         AND g.deleted_at IS NULL
         AND gs.end_date BETWEEN CURRENT_DATE AND CURRENT_DATE + INTERVAL '${GYM_LICENSE_DUE_SOON_DAYS} days'
+    `),
+      db.query(`
+      SELECT COUNT(*)::int AS count
+      FROM Gyms g
+      JOIN GymSubscriptions gs ON gs.gym_id = g.id
+      WHERE LOWER(g.subscription_status) = 'active'
+        AND g.deleted_at IS NULL
+        AND gs.saas_plan_id IS NULL
+        AND gs.plan = 'Free Trial'
+        AND gs.end_date::date BETWEEN CURRENT_DATE AND (CURRENT_DATE + INTERVAL '7 days')
     `),
       db.query(`
       SELECT g.name, COUNT(m.id) FILTER (
@@ -1034,6 +1048,7 @@ router.get('/dashboard', async (req, res, next) => {
       unpaidExpiredGyms: parseInt(unpaidGymsRes.rows[0].count, 10),
       unpaidCatchUpGyms: unpaidCatchUpRes.rows[0].count,
       dueSoonGyms: dueSoonRes.rows[0].count,
+      trialEndingGyms: trialEndingRes.rows[0].count,
       platformActiveMembers: parseInt(activeUsersRes.rows[0].count, 10),
       averageMembersPerGym: parseFloat(avgUsersRes.rows[0].avg_members_per_gym).toFixed(1),
       estimatedMonthlyRevenue,
@@ -1064,6 +1079,9 @@ const GYM_LICENSE_SMS_TYPES = [
   'gym_license_expires_today',
   'gym_license_expired',
   'gym_license_renewed',
+  'gym_trial_due_in_3_days',
+  'gym_trial_expires_today',
+  'gym_trial_expired',
 ];
 
 const OTP_SMS_TYPES = [
@@ -1479,6 +1497,8 @@ const GYM_REPORT_BASE = `
     g.name,
     g.owner_name,
     g.phone,
+    g.city,
+    g.address,
     g.subscription_status,
     g.created_at,
     COUNT(m.id) FILTER (

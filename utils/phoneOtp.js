@@ -5,7 +5,12 @@
 
 const crypto = require('crypto');
 const db = require('../config/db');
-const { sendOtp, otpTtlSeconds } = require('./smsProvider');
+const {
+  sendOtp,
+  createManagedOtp,
+  sendManagedOtp,
+  otpTtlSeconds,
+} = require('./smsProvider');
 const { normalizeEthiopianPhone } = require('./phone');
 const { logOtpSms } = require('./notificationSms');
 
@@ -14,8 +19,103 @@ const PURPOSE = Object.freeze({
   GYM_SIGNUP: 'gym_signup',
 });
 
+const OTP_RESEND_COOLDOWN_SECONDS = Number(process.env.OTP_RESEND_COOLDOWN_SECONDS || 60);
+
 function sessionTtlMs() {
   return otpTtlSeconds() * 1000;
+}
+
+function otpSmsOptions(purpose) {
+  return {
+    prefix:
+      purpose === PURPOSE.GYM_SIGNUP
+        ? 'ንቁ: Your registration code is'
+        : 'ንቁ: Your password reset code is',
+    postfix: '',
+  };
+}
+
+function otpAdvisoryLockKeys(purpose, normalized, meta = {}) {
+  const key = meta.userId ? `${purpose}:user:${meta.userId}` : `${purpose}:${normalized}`;
+  const hash = crypto.createHash('sha256').update(key).digest();
+  return [hash.readInt32BE(0), hash.readInt32BE(4)];
+}
+
+async function clearExistingSessions(client, purpose, normalized, meta = {}) {
+  if (purpose === PURPOSE.FORGOT_PASSWORD && meta.userId) {
+    await client.query('DELETE FROM PhoneOtpSessions WHERE purpose = $1 AND user_id = $2', [
+      purpose,
+      meta.userId,
+    ]);
+    return;
+  }
+  await client.query('DELETE FROM PhoneOtpSessions WHERE purpose = $1 AND phone = $2', [
+    purpose,
+    normalized,
+  ]);
+}
+
+async function findRecentActiveSession(client, purpose, normalized, meta = {}) {
+  const cooldown = Number.isFinite(OTP_RESEND_COOLDOWN_SECONDS)
+    ? Math.max(0, Math.floor(OTP_RESEND_COOLDOWN_SECONDS))
+    : 60;
+  if (cooldown <= 0) return null;
+
+  const params = [purpose, cooldown];
+  let userClause = '';
+  if (purpose === PURPOSE.FORGOT_PASSWORD && meta.userId) {
+    userClause = 'AND user_id = $3';
+    params.push(meta.userId);
+  } else {
+    userClause = 'AND phone = $3';
+    params.push(normalized);
+  }
+
+  const result = await client.query(
+    `
+    SELECT id, expires_at
+    FROM PhoneOtpSessions
+    WHERE purpose = $1
+      AND consumed_at IS NULL
+      AND expires_at > NOW()
+      AND created_at > NOW() - ($2::int * INTERVAL '1 second')
+      ${userClause}
+    ORDER BY created_at DESC
+    LIMIT 1
+    `,
+    params
+  );
+  return result.rows[0] || null;
+}
+
+async function insertOtpSession(client, {
+  sessionId,
+  purpose,
+  normalized,
+  verificationId,
+  userId,
+  expiresAt,
+}) {
+  await client.query(
+    `
+    INSERT INTO PhoneOtpSessions (id, purpose, phone, verification_id, user_id, expires_at)
+    VALUES ($1, $2, $3, $4, $5, $6)
+    `,
+    [sessionId, purpose, normalized, verificationId, userId ?? null, expiresAt]
+  );
+}
+
+async function logOtpDelivery(purpose, normalized, otpResult) {
+  try {
+    await logOtpSms({
+      purpose,
+      phone: normalized,
+      messageId: otpResult.message_id || otpResult.verificationId,
+      otpCode: otpResult.code ?? null,
+    });
+  } catch (logErr) {
+    console.error('[SMS] OTP audit log failed:', logErr.message);
+  }
 }
 
 /**
@@ -31,48 +131,68 @@ async function startPhoneOtpSession(purpose, phone, meta = {}) {
     throw err;
   }
 
-  const otpResult = await sendOtp(normalized, {
-    prefix: purpose === PURPOSE.GYM_SIGNUP
-      ? 'ንቁ: Your registration code is'
-      : 'ንቁ: Your password reset code is',
-    postfix: '',
-  });
-
+  const client = await db.pool.connect();
   try {
-    await logOtpSms({
-      purpose,
-      phone: normalized,
-      messageId: otpResult.message_id || otpResult.verificationId,
-      otpCode: otpResult.code ?? null,
-    });
-  } catch (logErr) {
-    console.error('[SMS] OTP audit log failed:', logErr.message);
-  }
+    await client.query('BEGIN');
+    const [lockA, lockB] = otpAdvisoryLockKeys(purpose, normalized, meta);
+    await client.query('SELECT pg_advisory_xact_lock($1, $2)', [lockA, lockB]);
 
-  const sessionId = crypto.randomUUID();
-  const expiresAt = new Date(Date.now() + sessionTtlMs());
+    const recent = await findRecentActiveSession(client, purpose, normalized, meta);
+    if (recent) {
+      await client.query('COMMIT');
+      return {
+        sessionId: recent.id,
+        expiresAt: recent.expires_at,
+        phone: normalized,
+        reused: true,
+      };
+    }
 
-  if (purpose === PURPOSE.FORGOT_PASSWORD && meta.userId) {
-    await db.query('DELETE FROM PhoneOtpSessions WHERE purpose = $1 AND user_id = $2', [
-      purpose,
-      meta.userId,
-    ]);
-  } else {
-    await db.query('DELETE FROM PhoneOtpSessions WHERE purpose = $1 AND phone = $2', [
+    const smsOptions = otpSmsOptions(purpose);
+    const sessionId = crypto.randomUUID();
+    const expiresAt = new Date(Date.now() + sessionTtlMs());
+    await clearExistingSessions(client, purpose, normalized, meta);
+
+    const managed = createManagedOtp(normalized);
+    if (managed) {
+      await insertOtpSession(client, {
+        sessionId,
+        purpose,
+        normalized,
+        verificationId: managed.verificationId,
+        userId: meta.userId,
+        expiresAt,
+      });
+
+      const otpResult = await sendManagedOtp(normalized, managed, smsOptions);
+      await client.query('COMMIT');
+      await logOtpDelivery(purpose, normalized, otpResult);
+      return { sessionId, expiresAt, phone: normalized };
+    }
+
+    const otpResult = await sendOtp(normalized, smsOptions);
+    await insertOtpSession(client, {
+      sessionId,
       purpose,
       normalized,
-    ]);
+      verificationId: otpResult.verificationId,
+      userId: meta.userId,
+      expiresAt,
+    });
+    await client.query('COMMIT');
+    await logOtpDelivery(purpose, normalized, otpResult);
+
+    return { sessionId, expiresAt, phone: normalized };
+  } catch (error) {
+    try {
+      await client.query('ROLLBACK');
+    } catch {
+      // ignore rollback failure
+    }
+    throw error;
+  } finally {
+    client.release();
   }
-
-  await db.query(
-    `
-    INSERT INTO PhoneOtpSessions (id, purpose, phone, verification_id, user_id, expires_at)
-    VALUES ($1, $2, $3, $4, $5, $6)
-    `,
-    [sessionId, purpose, normalized, otpResult.verificationId, meta.userId ?? null, expiresAt]
-  );
-
-  return { sessionId, expiresAt, phone: normalized };
 }
 
 async function getActiveSession(sessionId, purpose) {
@@ -97,6 +217,9 @@ async function consumeSession(sessionId) {
 const GENERIC_OTP_SENT =
   'If an account exists for that username, a verification code has been sent to the registered phone.';
 
+const OTP_ALREADY_SENT =
+  'A verification code was already sent recently. Check your messages or wait a minute before requesting another.';
+
 /** Same shape as a real OTP response — prevents account enumeration via missing sessionId. */
 function createDecoyOtpSession() {
   return {
@@ -105,11 +228,23 @@ function createDecoyOtpSession() {
   };
 }
 
-function buildOtpRequestPayload(sessionId, expiresAt) {
+function buildOtpRequestPayload(sessionId, expiresAt, reused = false) {
   return {
-    message: GENERIC_OTP_SENT,
+    message: reused ? OTP_ALREADY_SENT : GENERIC_OTP_SENT,
     sessionId,
     expiresAt,
+    reused: Boolean(reused),
+  };
+}
+
+function buildGymSignupOtpPayload(sessionId, expiresAt, reused = false) {
+  return {
+    message: reused
+      ? OTP_ALREADY_SENT
+      : 'Verification code sent to your phone.',
+    sessionId,
+    expiresAt,
+    reused: Boolean(reused),
   };
 }
 
@@ -120,6 +255,8 @@ module.exports = {
   consumeSession,
   createDecoyOtpSession,
   buildOtpRequestPayload,
+  buildGymSignupOtpPayload,
   GENERIC_OTP_SENT,
+  OTP_ALREADY_SENT,
   normalizeEthiopianPhone,
 };

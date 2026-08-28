@@ -16,6 +16,8 @@ const { computePercentChange, computeCountDelta } = require('../utils/periodComp
 const { resolveBranchScope, gymBranchParams } = require('../utils/branchScope');
 const { fetchBranchComparisonMetrics } = require('../utils/branchComparison');
 const { isGymOwner } = require('../utils/roles');
+const { isTrialSubscription, trialDaysLeft } = require('../utils/gymTrial');
+const { calendarDateString } = require('../utils/localDate');
 
 router.use(auth, checkSubscription, requireGymAccess);
 
@@ -324,6 +326,20 @@ router.get('/', async (req, res, next) => {
     const newMembersThisMonth = newMembersThisMonthRes.rows[0].count;
     const newMembersLastMonth = newMembersLastMonthRes.rows[0].count;
 
+    const subResult = await db.query(
+      `
+      SELECT gs.plan, gs.saas_plan_id, gs.end_date
+      FROM GymSubscriptions gs
+      WHERE gs.gym_id = $1
+      `,
+      [gym_id]
+    );
+    const subRow = subResult.rows[0];
+    const isTrial = subRow ? isTrialSubscription(subRow) : false;
+    const licenseEndDate = subRow ? calendarDateString(subRow.end_date) : null;
+    const trialDaysLeftValue =
+      isTrial && licenseEndDate ? trialDaysLeft(licenseEndDate) : null;
+
     res.json({
       totalMembers: totalMembersRes.rows[0].count,
       activeMembers: activeMembersRes.rows[0].count,
@@ -348,6 +364,14 @@ router.get('/', async (req, res, next) => {
       branchId: scope.branchId,
       subscriptionStatus: req.gymSubscriptionStatus,
       readOnly: req.gymSubscriptionStatus === 'suspended',
+      isTrial,
+      trialEndDate: isTrial ? licenseEndDate : undefined,
+      trialDaysLeft:
+        isTrial && trialDaysLeftValue != null && trialDaysLeftValue >= 0
+          ? trialDaysLeftValue
+          : isTrial
+            ? 0
+            : undefined,
     });
   } catch (error) {
     next(error);

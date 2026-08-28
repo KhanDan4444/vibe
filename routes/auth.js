@@ -55,6 +55,7 @@ const {
   consumeSession,
   createDecoyOtpSession,
   buildOtpRequestPayload,
+  buildGymSignupOtpPayload,
 } = require('../utils/phoneOtp');
 const { registerGymWithOwner } = require('../utils/registerGymCore');
 const { linkSignupOtpToGym } = require('../utils/notificationSms');
@@ -155,21 +156,22 @@ router.post(
     }
     const { phone } = req.body;
     try {
-      const { sessionId, expiresAt } = await startPhoneOtpSession(PURPOSE.GYM_SIGNUP, phone);
-      res.json({
-        message: 'Verification code sent to your phone.',
-        sessionId,
-        expiresAt,
-      });
+      const { sessionId, expiresAt, reused } = await startPhoneOtpSession(PURPOSE.GYM_SIGNUP, phone);
+      res.json(buildGymSignupOtpPayload(sessionId, expiresAt, reused));
     } catch (error) {
       next(error);
     }
   }
 );
 
+function publicSignupTrialDays() {
+  const parsed = parseInt(process.env.GYM_SIGNUP_TRIAL_DAYS || '30', 10);
+  return Number.isNaN(parsed) || parsed < 1 ? 30 : parsed;
+}
+
 /**
  * POST /api/auth/gym-signup/complete
- * Verify OTP and create gym + owner (unpaid license term).
+ * Verify OTP and create gym + owner on a free trial license (no plan payment at signup).
  */
 router.post(
   '/gym-signup/complete',
@@ -190,7 +192,8 @@ router.post(
       username,
       password,
       phone,
-      saas_plan_id,
+      city,
+      address,
     } = req.body;
 
     const client = await db.pool.connect();
@@ -210,6 +213,7 @@ router.post(
       });
 
       await client.query('BEGIN');
+      const trialDays = publicSignupTrialDays();
       const { gym, owner, subscription } = await registerGymWithOwner(client, {
         gym_name,
         owner_name,
@@ -217,7 +221,9 @@ router.post(
         username,
         password,
         phone,
-        saas_plan_id,
+        city,
+        address,
+        trial_days: trialDays,
       });
       await linkSignupOtpToGym(gym.id, phone);
       await consumeSession(sessionId);
@@ -225,12 +231,14 @@ router.post(
 
       res.status(201).json({
         message: 'Gym registered. Sign in with your username and password.',
-        gym: { id: gym.id, name: gym.name },
+        gym: { id: gym.id, name: gym.name, city: gym.city, address: gym.address },
         owner: { id: owner.id, username: owner.username },
         subscription: {
           plan_name: subscription.plan.name,
           start_date: subscription.start_date,
           end_date: subscription.end_date,
+          is_trial: Boolean(subscription.is_trial),
+          trial_days: subscription.is_trial ? trialDays : undefined,
         },
       });
     } catch (error) {
@@ -447,10 +455,11 @@ router.post(
 
       let sessionId;
       let expiresAt;
+      let reused = false;
 
       if (owner?.phone && normalizeEthiopianPhone(owner.phone)) {
         try {
-          ({ sessionId, expiresAt } = await startPhoneOtpSession(
+          ({ sessionId, expiresAt, reused = false } = await startPhoneOtpSession(
             PURPOSE.FORGOT_PASSWORD,
             owner.phone,
             { userId: owner.id }
@@ -463,7 +472,7 @@ router.post(
         ({ sessionId, expiresAt } = createDecoyOtpSession());
       }
 
-      res.json(buildOtpRequestPayload(sessionId, expiresAt));
+      res.json(buildOtpRequestPayload(sessionId, expiresAt, reused));
     } catch (error) {
       next(error);
     }

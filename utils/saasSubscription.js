@@ -2,7 +2,9 @@
  * Helpers for platform SaaS gym subscriptions (GymSubscriptions + SaaSPlans).
  */
 
-const { formatLocalDate, parseLocalDate, todayLocalString } = require('./localDate');
+const { formatLocalDate, parseLocalDate, todayLocalString, addCalendarDays } = require('./localDate');
+
+const TRIAL_PLAN_LABEL = 'Free Trial';
 
 /**
  * @param {Date | string} startDate
@@ -66,4 +68,47 @@ async function assignSaasPlanToGym(client, gymId, saasPlanId, startDateStr, endD
   return { plan, start_date: start, end_date: end };
 }
 
-module.exports = { calculateSaasEndDate, assignSaasPlanToGym };
+/**
+ * Self-service signup: active license with no paid SaaS plan until admin renews.
+ * @param {import('pg').PoolClient | { query: Function }} client
+ * @param {number} gymId
+ * @param {number} trialDays days of access including start date
+ * @param {string} [startDateStr] defaults to today
+ */
+async function assignTrialToGym(client, gymId, trialDays, startDateStr) {
+  const days = parseInt(trialDays, 10);
+  if (Number.isNaN(days) || days < 1) {
+    throw new Error('Invalid trial duration.');
+  }
+
+  const start = startDateStr || todayLocalString();
+  const end = addCalendarDays(start, days - 1);
+
+  await client.query(
+    `
+    INSERT INTO GymSubscriptions (gym_id, saas_plan_id, plan, start_date, end_date, status)
+    VALUES ($1, NULL, $2, $3, $4, 'active')
+    ON CONFLICT (gym_id) DO UPDATE SET
+      saas_plan_id = EXCLUDED.saas_plan_id,
+      plan = EXCLUDED.plan,
+      start_date = EXCLUDED.start_date,
+      end_date = EXCLUDED.end_date,
+      status = 'active'
+    `,
+    [gymId, TRIAL_PLAN_LABEL, start, end]
+  );
+
+  return {
+    plan: { name: TRIAL_PLAN_LABEL, duration: days, price: 0 },
+    start_date: start,
+    end_date: end,
+    is_trial: true,
+  };
+}
+
+module.exports = {
+  TRIAL_PLAN_LABEL,
+  calculateSaasEndDate,
+  assignSaasPlanToGym,
+  assignTrialToGym,
+};
