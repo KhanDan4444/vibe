@@ -238,6 +238,7 @@ CREATE TABLE IF NOT EXISTS PhoneOtpSessions (
     verification_id VARCHAR(255) NOT NULL,
     user_id INT REFERENCES Users(id) ON DELETE CASCADE,
     expires_at TIMESTAMPTZ NOT NULL,
+    verified_at TIMESTAMPTZ,
     consumed_at TIMESTAMPTZ,
     created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
 );

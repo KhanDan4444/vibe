@@ -42,6 +42,7 @@ const {
   requestForgotOtpSchema,
   resetForgotOtpSchema,
   gymSignupRequestOtpSchema,
+  gymSignupVerifyOtpSchema,
   gymSignupCompleteSchema,
   resetPasswordSchema,
   changePasswordSchema,
@@ -52,6 +53,7 @@ const {
   PURPOSE,
   startPhoneOtpSession,
   getActiveSession,
+  verifyPhoneOtpSession,
   consumeSession,
   createDecoyOtpSession,
   buildOtpRequestPayload,
@@ -170,6 +172,38 @@ function publicSignupTrialDays() {
 }
 
 /**
+ * POST /api/auth/gym-signup/verify-otp
+ * Verify phone OTP mid-flow before owner account details (step 2 continue).
+ */
+router.post(
+  '/gym-signup/verify-otp',
+  publicGymSignupLimiter,
+  otpVerifyLimiter,
+  validateBody(gymSignupVerifyOtpSchema),
+  async (req, res, next) => {
+    if (!isPublicGymSignupEnabled()) {
+      return res.status(403).json({ error: 'Gym self-registration is not available.' });
+    }
+
+    const { sessionId, code, phone } = req.body;
+    try {
+      await verifyPhoneOtpSession({
+        sessionId,
+        purpose: PURPOSE.GYM_SIGNUP,
+        phone,
+        code,
+      });
+      res.json({ ok: true, message: 'Phone verified.' });
+    } catch (error) {
+      if (error.statusCode === 400) {
+        return res.status(400).json({ error: error.message });
+      }
+      next(error);
+    }
+  }
+);
+
+/**
  * POST /api/auth/gym-signup/complete
  * Verify OTP and create gym + owner on a free trial license (no plan payment at signup).
  */
@@ -206,11 +240,13 @@ router.post(
         return res.status(400).json({ error: 'Phone number does not match the verified session.' });
       }
 
-      await verifyOtp({
-        verificationId: session.verification_id,
-        phone: session.phone,
-        code,
-      });
+      if (!session.verified_at) {
+        await verifyOtp({
+          verificationId: session.verification_id,
+          phone: session.phone,
+          code,
+        });
+      }
 
       await client.query('BEGIN');
       const trialDays = publicSignupTrialDays();

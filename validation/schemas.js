@@ -358,6 +358,12 @@ const gymSignupRequestOtpSchema = z.object({
   phone: ethiopianPhone,
 });
 
+const gymSignupVerifyOtpSchema = z.object({
+  sessionId: otpSessionId,
+  code: otpCode,
+  phone: ethiopianPhone,
+});
+
 const gymSignupCompleteSchema = z.object({
   sessionId: otpSessionId,
   code: otpCode,
@@ -466,6 +472,7 @@ module.exports = {
   requestForgotOtpSchema,
   resetForgotOtpSchema,
   gymSignupRequestOtpSchema,
+  gymSignupVerifyOtpSchema,
   gymSignupCompleteSchema,
   resetPasswordSchema,
   changePasswordSchema,

@@ -10,6 +10,7 @@ const {
   createManagedOtp,
   sendManagedOtp,
   otpTtlSeconds,
+  verifyOtp,
 } = require('./smsProvider');
 const { normalizeEthiopianPhone } = require('./phone');
 const { logOtpSms } = require('./notificationSms');
@@ -198,13 +199,48 @@ async function startPhoneOtpSession(purpose, phone, meta = {}) {
 async function getActiveSession(sessionId, purpose) {
   const result = await db.query(
     `
-    SELECT id, purpose, phone, verification_id, user_id, expires_at, consumed_at
+    SELECT id, purpose, phone, verification_id, user_id, expires_at, verified_at, consumed_at
     FROM PhoneOtpSessions
     WHERE id = $1 AND purpose = $2 AND expires_at > NOW() AND consumed_at IS NULL
     `,
     [sessionId, purpose]
   );
   return result.rows[0] || null;
+}
+
+async function markSessionVerified(sessionId) {
+  await db.query(
+    `UPDATE PhoneOtpSessions SET verified_at = CURRENT_TIMESTAMP WHERE id = $1 AND verified_at IS NULL`,
+    [sessionId]
+  );
+}
+
+/**
+ * Verify OTP for an active session and mark it verified (for multi-step flows).
+ */
+async function verifyPhoneOtpSession({ sessionId, purpose, phone, code }) {
+  const session = await getActiveSession(sessionId, purpose);
+  if (!session) {
+    const err = new Error('Verification session expired. Request a new code.');
+    err.statusCode = 400;
+    throw err;
+  }
+  const normalized = normalizeEthiopianPhone(phone);
+  if (!normalized || session.phone !== normalized) {
+    const err = new Error('Phone number does not match the verified session.');
+    err.statusCode = 400;
+    throw err;
+  }
+  if (session.verified_at) {
+    return session;
+  }
+  await verifyOtp({
+    verificationId: session.verification_id,
+    phone: session.phone,
+    code,
+  });
+  await markSessionVerified(sessionId);
+  return session;
 }
 
 async function consumeSession(sessionId) {
@@ -252,6 +288,8 @@ module.exports = {
   PURPOSE,
   startPhoneOtpSession,
   getActiveSession,
+  markSessionVerified,
+  verifyPhoneOtpSession,
   consumeSession,
   createDecoyOtpSession,
   buildOtpRequestPayload,
