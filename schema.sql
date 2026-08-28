@@ -233,7 +233,7 @@ CREATE TABLE IF NOT EXISTS PhoneOtpSessions (
     id UUID PRIMARY KEY,
     purpose VARCHAR(32) NOT NULL,
     phone VARCHAR(20) NOT NULL,
-    verification_id VARCHAR(64) NOT NULL,
+    verification_id VARCHAR(255) NOT NULL,
     user_id INT REFERENCES Users(id) ON DELETE CASCADE,
     expires_at TIMESTAMPTZ NOT NULL,
     consumed_at TIMESTAMPTZ,
@@ -249,7 +249,7 @@ CREATE TABLE IF NOT EXISTS SmsLog (
     message_type VARCHAR(64) NOT NULL,
     entity_type VARCHAR(32),
     entity_id INT,
-    message_id VARCHAR(64),
+    message_id VARCHAR(255),
     otp_code VARCHAR(8),
     sent_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
 );
