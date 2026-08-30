@@ -6,10 +6,16 @@
 const db = require('../config/db');
 const { formatDisplayDateFromIso } = require('./localDate');
 const { sendSms, isSmsConfigured } = require('./smsProvider');
+const { sendMessage: sendTelegramMessage, isTelegramConfigured } = require('./telegramBot');
 const { normalizeEthiopianPhone } = require('./phone');
 const { ROLES } = require('./roles');
 const { SMS_BRAND } = require('./brand');
 const { isTrialSubscription } = require('./gymTrial');
+
+const MESSAGE_CHANNELS = Object.freeze({
+  SMS: 'sms',
+  TELEGRAM: 'telegram',
+});
 
 const SMS_TYPES = Object.freeze({
   MEMBER_DUE_SOON: 'member_due_soon',
@@ -35,7 +41,7 @@ const OTP_PURPOSE_TO_MESSAGE_TYPE = Object.freeze({
   gym_signup: SMS_TYPES.OTP_GYM_SIGNUP,
 });
 
-async function wasSmsSentToday(messageType, entityType, entityId) {
+async function wasMessageSentToday(messageType, entityType, entityId) {
   const result = await db.query(
     `
     SELECT 1 FROM SmsLog
@@ -50,14 +56,34 @@ async function wasSmsSentToday(messageType, entityType, entityId) {
   return result.rows.length > 0;
 }
 
-async function logSms({ recipientPhone, messageType, entityType, entityId, messageId, otpCode }) {
+async function logMessage({
+  channel = MESSAGE_CHANNELS.SMS,
+  recipientPhone = null,
+  recipientAddress = null,
+  messageType,
+  entityType,
+  entityId,
+  messageId,
+  otpCode,
+}) {
   await db.query(
     `
-    INSERT INTO SmsLog (recipient_phone, message_type, entity_type, entity_id, message_id, otp_code)
-    VALUES ($1, $2, $3, $4, $5, $6)
+    INSERT INTO SmsLog (
+      recipient_phone,
+      recipient_address,
+      channel,
+      message_type,
+      entity_type,
+      entity_id,
+      message_id,
+      otp_code
+    )
+    VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
   `,
     [
       recipientPhone,
+      recipientAddress,
+      channel,
       messageType,
       entityType,
       entityId ?? null,
@@ -65,6 +91,19 @@ async function logSms({ recipientPhone, messageType, entityType, entityId, messa
       otpCode ?? null,
     ]
   );
+}
+
+/** @deprecated Use logMessage */
+async function logSms({ recipientPhone, messageType, entityType, entityId, messageId, otpCode }) {
+  return logMessage({
+    channel: MESSAGE_CHANNELS.SMS,
+    recipientPhone,
+    messageType,
+    entityType,
+    entityId,
+    messageId,
+    otpCode,
+  });
 }
 
 /** Audit log for OTP sends (entity_id stays null so repeat sends are all logged). */
@@ -102,6 +141,52 @@ async function linkSignupOtpToGym(gymId, phone) {
   );
 }
 
+async function deliverTelegram({
+  to,
+  message,
+  messageType,
+  entityType,
+  entityId,
+  skipDailyDedupe = false,
+  memberPhone = null,
+}) {
+  const chatId = String(to ?? '').trim();
+  if (!chatId || !/^-?\d+$/.test(chatId)) {
+    console.warn(
+      `[Telegram] Skipped ${messageType}: invalid chat id for ${entityType}:${entityId ?? 'n/a'}`
+    );
+    return { ok: false, error: 'invalid_chat_id' };
+  }
+
+  if (
+    !skipDailyDedupe &&
+    entityId != null &&
+    (await wasMessageSentToday(messageType, entityType, entityId))
+  ) {
+    return { ok: false, error: 'already_sent_today' };
+  }
+
+  try {
+    const result = await sendTelegramMessage(chatId, message);
+    await logMessage({
+      channel: MESSAGE_CHANNELS.TELEGRAM,
+      recipientPhone: memberPhone,
+      recipientAddress: chatId,
+      messageType,
+      entityType,
+      entityId,
+      messageId: result.message_id,
+    });
+    return { ok: true, channel: MESSAGE_CHANNELS.TELEGRAM };
+  } catch (err) {
+    console.error(
+      `[Telegram] Failed ${messageType} entity=${entityType}:${entityId}:`,
+      err.message
+    );
+    return { ok: false, error: err.message || 'send_failed' };
+  }
+}
+
 async function deliverSms({ to, message, messageType, entityType, entityId, skipDailyDedupe = false }) {
   const phone = normalizeEthiopianPhone(to);
   if (!phone) {
@@ -114,25 +199,152 @@ async function deliverSms({ to, message, messageType, entityType, entityId, skip
   if (
     !skipDailyDedupe &&
     entityId != null &&
-    (await wasSmsSentToday(messageType, entityType, entityId))
+    (await wasMessageSentToday(messageType, entityType, entityId))
   ) {
     return { ok: false, error: 'already_sent_today' };
   }
 
   try {
     const result = await sendSms(phone, message);
-    await logSms({
+    await logMessage({
+      channel: MESSAGE_CHANNELS.SMS,
       recipientPhone: phone,
+      recipientAddress: phone,
       messageType,
       entityType,
       entityId,
       messageId: result.message_id,
     });
-    return { ok: true };
+    return { ok: true, channel: MESSAGE_CHANNELS.SMS };
   } catch (err) {
     console.error(`[SMS] Failed ${messageType} entity=${entityType}:${entityId}:`, err.message);
     return { ok: false, error: err.message || 'send_failed' };
   }
+}
+
+/**
+ * Route an outbound member/gym message to SMS or Telegram.
+ * Phase 3 will call resolveMemberChannel() before most member sends.
+ */
+async function deliverMessage({
+  channel = MESSAGE_CHANNELS.SMS,
+  to,
+  message,
+  messageType,
+  entityType,
+  entityId,
+  skipDailyDedupe = false,
+  memberPhone = null,
+}) {
+  if (channel === MESSAGE_CHANNELS.TELEGRAM) {
+    return deliverTelegram({
+      to,
+      message,
+      messageType,
+      entityType,
+      entityId,
+      skipDailyDedupe,
+      memberPhone,
+    });
+  }
+  return deliverSms({
+    to,
+    message,
+    messageType,
+    entityType,
+    entityId,
+    skipDailyDedupe,
+  });
+}
+
+/**
+ * Pick Telegram when linked and preferred; otherwise SMS.
+ * @param {{ telegram_chat_id?: number|null, preferred_channel?: string|null, phone?: string|null }} member
+ */
+function resolveMemberChannel(member) {
+  const chatId = member?.telegram_chat_id;
+  const pref = String(member?.preferred_channel || MESSAGE_CHANNELS.SMS).toLowerCase();
+  if (chatId && pref !== MESSAGE_CHANNELS.SMS && isTelegramConfigured()) {
+    return {
+      channel: MESSAGE_CHANNELS.TELEGRAM,
+      to: String(chatId),
+    };
+  }
+  return {
+    channel: MESSAGE_CHANNELS.SMS,
+    to: member?.phone || null,
+  };
+}
+
+/**
+ * True when member can receive via Telegram or SMS.
+ * @param {{ phone?: string|null, telegram_chat_id?: number|null, preferred_channel?: string|null }} member
+ */
+function memberReachable(member) {
+  const route = resolveMemberChannel(member);
+  if (route.channel === MESSAGE_CHANNELS.TELEGRAM && route.to) return true;
+  return Boolean(normalizeEthiopianPhone(member?.phone));
+}
+
+/**
+ * Whether the resolved delivery channel is configured on this server.
+ * @param {{ phone?: string|null, telegram_chat_id?: number|null, preferred_channel?: string|null }} member
+ */
+function isMemberMessagingConfigured(member) {
+  const route = resolveMemberChannel(member);
+  if (route.channel === MESSAGE_CHANNELS.TELEGRAM) return isTelegramConfigured();
+  return isSmsConfigured();
+}
+
+/**
+ * Deliver to Telegram when linked; fall back to SMS on failure or when SMS-only.
+ * @param {{ id: number, phone?: string|null, telegram_chat_id?: number|null, preferred_channel?: string|null }} member
+ */
+async function deliverMemberMessage(member, { message, messageType, skipDailyDedupe = false }) {
+  const route = resolveMemberChannel(member);
+
+  if (route.channel === MESSAGE_CHANNELS.TELEGRAM && route.to) {
+    const result = await deliverMessage({
+      channel: MESSAGE_CHANNELS.TELEGRAM,
+      to: route.to,
+      message,
+      messageType,
+      entityType: 'member',
+      entityId: member.id,
+      skipDailyDedupe,
+      memberPhone: member.phone || null,
+    });
+    if (result.ok || result.error === 'already_sent_today') {
+      return result;
+    }
+    if (member.phone && isSmsConfigured()) {
+      console.warn(
+        `[Message] Telegram failed for member ${member.id} (${result.error}); falling back to SMS`
+      );
+      return deliverSms({
+        to: member.phone,
+        message,
+        messageType,
+        entityType: 'member',
+        entityId: member.id,
+        skipDailyDedupe,
+      });
+    }
+    return result;
+  }
+
+  if (!member.phone) {
+    return { ok: false, error: 'no_phone' };
+  }
+
+  return deliverSms({
+    to: member.phone,
+    message,
+    messageType,
+    entityType: 'member',
+    entityId: member.id,
+    skipDailyDedupe,
+  });
 }
 
 async function getGymOwnerContact(gymId) {
@@ -150,77 +362,68 @@ async function getGymOwnerContact(gymId) {
 }
 
 /**
- * @param {{ id: number, name: string, phone?: string, gym_id: number, end_date?: string }} member
+ * @param {{ id: number, name: string, phone?: string|null, telegram_chat_id?: number|null, preferred_channel?: string|null, end_date?: string }} member
  * @param {string} gymName
  */
 async function smsMemberDueSoon(member, gymName) {
-  if (!member.phone) return { ok: false, error: 'no_phone' };
+  if (!memberReachable(member)) return { ok: false, error: 'no_contact' };
   const endDate = formatDisplayDateFromIso(member.end_date) || 'soon';
   const message = `Hi ${member.name}, your membership at ${gymName} ends on ${endDate}.`;
-  return deliverSms({
-    to: member.phone,
+  return deliverMemberMessage(member, {
     message,
     messageType: SMS_TYPES.MEMBER_DUE_SOON,
-    entityType: 'member',
-    entityId: member.id,
   });
 }
 
 async function smsMemberExpiresToday(member, gymName) {
-  if (!member.phone) return { ok: false, error: 'no_phone' };
+  if (!memberReachable(member)) return { ok: false, error: 'no_contact' };
   const message = `Hi ${member.name}, your membership at ${gymName} expires today. Renew at the front desk to stay active.`;
-  return deliverSms({
-    to: member.phone,
+  return deliverMemberMessage(member, {
     message,
     messageType: SMS_TYPES.MEMBER_EXPIRES_TODAY,
-    entityType: 'member',
-    entityId: member.id,
   });
 }
 
 async function smsMemberExpired(member, gymName) {
-  if (!member.phone) return { ok: false, error: 'no_phone' };
+  if (!memberReachable(member)) return { ok: false, error: 'no_contact' };
   const message = `Hi ${member.name}, your membership at ${gymName} has expired. Contact the gym to renew.`;
-  return deliverSms({
-    to: member.phone,
+  return deliverMemberMessage(member, {
     message,
     messageType: SMS_TYPES.MEMBER_EXPIRED,
-    entityType: 'member',
-    entityId: member.id,
   });
 }
 
 /**
- * @param {{ id: number, name: string, phone?: string }} member
+ * @param {{ id: number, name: string, phone?: string|null, telegram_chat_id?: number|null, preferred_channel?: string|null }} member
  * @param {string} gymName
  * @param {string} endDate
  * @param {{ passUrl?: string|null }} [opts]
  */
 async function smsMemberRenewed(member, gymName, endDate, opts = {}) {
-  if (!member.phone) return { ok: false, error: 'no_phone' };
+  if (!memberReachable(member)) return { ok: false, error: 'no_contact' };
   const firstName = String(member.name || '')
     .trim()
     .split(/\s+/)
     .filter(Boolean)[0] || 'there';
   const ends = formatDisplayDateFromIso(endDate) || 'soon';
-  const message = `Hi ${firstName}, your membership at ${gymName} has been renewed. New term ends on ${ends}. Thank you!`;
-  // Pass links omitted for now — personal-SIM gateways flag URL SMS as spam.
-  return deliverSms({
-    to: member.phone,
+  let message = `Hi ${firstName}, your membership at ${gymName} has been renewed. New term ends on ${ends}. Thank you!`;
+  const route = resolveMemberChannel(member);
+  if (opts.passUrl && route.channel === MESSAGE_CHANNELS.TELEGRAM) {
+    message = `${message}\n\nYour check-in pass: ${opts.passUrl}`;
+  }
+  return deliverMemberMessage(member, {
     message,
     messageType: SMS_TYPES.MEMBER_RENEWED,
-    entityType: 'member',
-    entityId: member.id,
   });
 }
 
 /**
- * @param {{ id: number, name: string, phone?: string }} member
+ * @param {{ id: number, name: string, phone?: string|null, telegram_chat_id?: number|null, preferred_channel?: string|null }} member
  * @param {string} gymName
  * @param {{ planName?: string, startDate?: string, endDate?: string, passUrl?: string|null }} term
  */
 async function smsMemberEnrolled(member, gymName, term = {}) {
-  if (!member.phone) return { ok: false, error: 'no_phone' };
+  if (!memberReachable(member)) return { ok: false, error: 'no_contact' };
   const firstName = String(member.name || '')
     .trim()
     .split(/\s+/)
@@ -230,36 +433,33 @@ async function smsMemberEnrolled(member, gymName, term = {}) {
     ? String(term.planName).trim().replace(/\s*·\s*/g, ' - ')
     : '';
   const planBit = planLabel ? `Your ${planLabel} membership plan` : 'Your membership';
-  const message = `Hi ${firstName}, welcome to ${gymName}. ${planBit} is active until ${ends}. We are glad to have you!`;
-  // Pass links omitted for now — personal-SIM gateways flag URL SMS as spam.
-  return deliverSms({
-    to: member.phone,
+  let message = `Hi ${firstName}, welcome to ${gymName}. ${planBit} is active until ${ends}. We are glad to have you!`;
+  const route = resolveMemberChannel(member);
+  if (term.passUrl && route.channel === MESSAGE_CHANNELS.TELEGRAM) {
+    message = `${message}\n\nYour check-in pass: ${term.passUrl}`;
+  }
+  return deliverMemberMessage(member, {
     message,
     messageType: SMS_TYPES.MEMBER_ENROLLED,
-    entityType: 'member',
-    entityId: member.id,
   });
 }
 
 /**
  * Send a link to the member’s public QR pass page (not the image).
- * @param {{ id: number, name: string, phone?: string }} member
+ * @param {{ id: number, name: string, phone?: string|null, telegram_chat_id?: number|null, preferred_channel?: string|null }} member
  * @param {string} gymName
  * @param {string} passUrl
  */
 async function smsMemberPassLink(member, gymName, passUrl) {
-  if (!member.phone) return { ok: false, error: 'no_phone' };
+  if (!memberReachable(member)) return { ok: false, error: 'no_contact' };
   const firstName = String(member.name || '')
     .trim()
     .split(/\s+/)
     .filter(Boolean)[0] || 'there';
   const message = `Hi ${firstName}, your ${gymName} check-in pass: ${passUrl} Show the QR at the desk when you arrive.`;
-  return deliverSms({
-    to: member.phone,
+  return deliverMemberMessage(member, {
     message,
     messageType: SMS_TYPES.MEMBER_PASS_LINK,
-    entityType: 'member',
-    entityId: member.id,
     skipDailyDedupe: true,
   });
 }
@@ -338,9 +538,18 @@ async function smsGymLicenseRenewed(gym, endDate, planName) {
 
 module.exports = {
   SMS_TYPES,
+  MESSAGE_CHANNELS,
   isSmsConfigured,
+  isTelegramConfigured,
   logOtpSms,
   linkSignupOtpToGym,
+  deliverMessage,
+  deliverSms,
+  deliverTelegram,
+  deliverMemberMessage,
+  resolveMemberChannel,
+  memberReachable,
+  isMemberMessagingConfigured,
   smsMemberDueSoon,
   smsMemberExpiresToday,
   smsMemberExpired,

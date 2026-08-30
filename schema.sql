@@ -94,9 +94,17 @@ CREATE TABLE IF NOT EXISTS Members (
     deleted_at TIMESTAMPTZ,
     pass_version INT NOT NULL DEFAULT 1,
     pass_public_code VARCHAR(16),
+    telegram_chat_id BIGINT,
+    telegram_linked_at TIMESTAMPTZ,
+    preferred_channel VARCHAR(16) NOT NULL DEFAULT 'sms'
+      CHECK (preferred_channel IN ('sms', 'telegram', 'both')),
     -- Forces client-level member tracking records to remain uniform
     CONSTRAINT check_member_status_lowercase CHECK (status = LOWER(status))
 );
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_members_telegram_chat_id
+    ON Members (telegram_chat_id)
+    WHERE telegram_chat_id IS NOT NULL;
 
 CREATE UNIQUE INDEX IF NOT EXISTS idx_members_pass_public_code
     ON Members (pass_public_code)
@@ -248,7 +256,9 @@ CREATE INDEX IF NOT EXISTS idx_phone_otp_sessions_user ON PhoneOtpSessions (user
 
 CREATE TABLE IF NOT EXISTS SmsLog (
     id SERIAL PRIMARY KEY,
-    recipient_phone VARCHAR(20) NOT NULL,
+    recipient_phone VARCHAR(20),
+    recipient_address VARCHAR(64),
+    channel VARCHAR(16) NOT NULL DEFAULT 'sms',
     message_type VARCHAR(64) NOT NULL,
     entity_type VARCHAR(32),
     entity_id INT,
@@ -257,11 +267,28 @@ CREATE TABLE IF NOT EXISTS SmsLog (
     sent_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
 );
 
+CREATE TABLE IF NOT EXISTS TelegramLinkTokens (
+    id SERIAL PRIMARY KEY,
+    member_id INT NOT NULL REFERENCES Members(id) ON DELETE CASCADE,
+    token VARCHAR(16) NOT NULL UNIQUE,
+    expires_at TIMESTAMPTZ NOT NULL,
+    used_at TIMESTAMPTZ,
+    created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_telegram_link_tokens_member
+    ON TelegramLinkTokens (member_id, created_at DESC);
+
+CREATE INDEX IF NOT EXISTS idx_telegram_link_tokens_expires
+    ON TelegramLinkTokens (expires_at)
+    WHERE used_at IS NULL;
+
 CREATE UNIQUE INDEX IF NOT EXISTS idx_sms_log_daily_dedupe
     ON SmsLog (message_type, entity_type, entity_id, ((sent_at AT TIME ZONE 'UTC')::date))
     WHERE entity_id IS NOT NULL;
 
 CREATE INDEX IF NOT EXISTS idx_sms_log_sent_at ON SmsLog (sent_at);
+CREATE INDEX IF NOT EXISTS idx_sms_log_channel ON SmsLog (channel);
 
 -- Desk check-ins + gym visit-cap settings (Phase 2)
 CREATE TABLE IF NOT EXISTS CheckIns (

@@ -117,10 +117,16 @@ const adminGymSmsQuerySchema = paginationQuerySchema.extend({
   phone: z.preprocess(emptyToUndefined, z.string().trim().max(20).optional()),
 });
 
+const MEMBER_SMS_CHANNEL_VALUES = ['all', 'sms', 'telegram'];
+
 const memberSmsQuerySchema = paginationQuerySchema.extend({
   type: z.preprocess(
     (v) => (v == null || v === '' ? 'all' : String(v).toLowerCase()),
     z.enum(MEMBER_SMS_TYPE_VALUES)
+  ),
+  channel: z.preprocess(
+    (v) => (v == null || v === '' ? 'all' : String(v).toLowerCase()),
+    z.enum(MEMBER_SMS_CHANNEL_VALUES)
   ),
   branch_id: optionalPositiveIntQuery,
   search: optionalSearch,

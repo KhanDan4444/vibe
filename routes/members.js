@@ -55,9 +55,18 @@ const {
   resolveMemberPhotoOnDisk,
   memberPhotoToDataUrl,
 } = require('../utils/memberPhotos');
-const { smsMemberPassLink, isSmsConfigured } = require('../utils/notificationSms');
+const {
+  smsMemberPassLink,
+  isSmsConfigured,
+  isTelegramConfigured,
+  memberReachable,
+  isMemberMessagingConfigured,
+  getGymOwnerContact,
+  smsMemberRenewed,
+  smsMemberEnrolled,
+} = require('../utils/notificationSms');
 const { PAYMENT_SOURCES } = require('../utils/paymentSources');
-const { getGymOwnerContact, smsMemberRenewed, smsMemberEnrolled } = require('../utils/notificationSms');
+const { createLinkToken } = require('../utils/telegramLink');
 
 router.use(auth, checkSubscription, requireGymAccess);
 
@@ -252,9 +261,10 @@ router.post('/enroll', requireActiveSubscription, validateBody(enrollMemberSchem
 
     let sms_sent = false;
     let sms_error = null;
-    if (member.phone) {
-      if (!isSmsConfigured()) {
-        sms_error = 'SMS is not configured on this server.';
+    let message_channel = null;
+    if (memberReachable(member)) {
+      if (!isMemberMessagingConfigured(member)) {
+        sms_error = 'Messaging is not configured on this server.';
       } else {
         try {
           const contact = await getGymOwnerContact(gym_id);
@@ -271,15 +281,17 @@ router.post('/enroll', requireActiveSubscription, validateBody(enrollMemberSchem
             passUrl,
           });
           sms_sent = Boolean(smsResult?.ok);
+          message_channel = smsResult?.channel || null;
           if (!sms_sent) {
             sms_error =
-              smsResult?.error && !['already_sent_today', 'no_phone', 'invalid_phone'].includes(smsResult.error)
+              smsResult?.error &&
+              !['already_sent_today', 'no_phone', 'no_contact', 'invalid_phone'].includes(smsResult.error)
                 ? smsResult.error
-                : 'Welcome SMS could not be delivered.';
+                : 'Welcome message could not be delivered.';
           }
         } catch (err) {
-          console.error('[SMS] Member enrollment confirmation failed:', err.message);
-          sms_error = err.message || 'Welcome SMS could not be delivered.';
+          console.error('[Message] Member enrollment confirmation failed:', err.message);
+          sms_error = err.message || 'Welcome message could not be delivered.';
         }
       }
     }
@@ -289,6 +301,7 @@ router.post('/enroll', requireActiveSubscription, validateBody(enrollMemberSchem
       payment,
       trainer_payment: trainerPayment,
       sms_sent,
+      message_channel,
       sms_error,
     });
   } catch (error) {
@@ -553,7 +566,8 @@ router.post(
       const packed = await db.query(
         `
         SELECT m.id, m.name, m.phone, m.photo_url, m.pass_version, m.branch_id,
-               m.start_date, m.end_date, b.name AS branch_name, g.name AS gym_name,
+               m.start_date, m.end_date, m.telegram_chat_id, m.preferred_channel,
+               b.name AS branch_name, g.name AS gym_name,
                p.name AS plan_name
         FROM Members m
         LEFT JOIN Branches b ON b.id = m.branch_id
@@ -591,7 +605,8 @@ router.post(
       });
 
       let sms_sent = false;
-      if (member.phone && isSmsConfigured()) {
+      let message_channel = null;
+      if (memberReachable(member) && (isSmsConfigured() || isTelegramConfigured())) {
         const passUrl = await buildPublicPassUrl({
           gymId,
           memberId: member.id,
@@ -599,12 +614,9 @@ router.post(
         });
         if (passUrl) {
           const contact = await getGymOwnerContact(gymId);
-          const smsResult = await smsMemberPassLink(
-            { id: member.id, name: member.name, phone: member.phone },
-            contact?.gym_name || 'your gym',
-            passUrl
-          );
+          const smsResult = await smsMemberPassLink(member, contact?.gym_name || 'your gym', passUrl);
           sms_sent = Boolean(smsResult?.ok);
+          message_channel = smsResult?.channel || null;
           if (sms_sent) {
             await recordAuditLog({
               req,
@@ -612,7 +624,7 @@ router.post(
               entityType: 'member',
               entityId: member.id,
               entityLabel: member.name,
-              details: { pass_version: passVersion, reason: 'regenerate' },
+              details: { pass_version: passVersion, reason: 'regenerate', channel: message_channel || 'sms' },
             });
           }
         }
@@ -623,6 +635,7 @@ router.post(
         pass_version: passVersion,
         qr_data_url,
         sms_sent,
+        message_channel,
         gym_name: member.gym_name || null,
         member: {
           id: member.id,
@@ -645,7 +658,7 @@ router.post(
 
 /**
  * POST /api/members/:id/pass/sms
- * Staff: SMS a link to the public pass page (not the QR image).
+ * Staff: send pass link via SMS or Telegram.
  */
 router.post(
   '/:id/pass/sms',
@@ -656,8 +669,8 @@ router.post(
     const { id } = req.params;
 
     try {
-      if (!isSmsConfigured()) {
-        return res.status(503).json({ error: 'SMS is not configured on this server.' });
+      if (!isSmsConfigured() && !isTelegramConfigured()) {
+        return res.status(503).json({ error: 'Messaging is not configured on this server.' });
       }
 
       const access = await memberBranchClause(req);
@@ -667,7 +680,8 @@ router.post(
 
       const result = await db.query(
         `
-        SELECT m.id, m.name, m.phone, m.pass_version, m.deleted_at, g.name AS gym_name
+        SELECT m.id, m.name, m.phone, m.pass_version, m.deleted_at, m.telegram_chat_id, m.preferred_channel,
+               g.name AS gym_name
         FROM Members m
         JOIN Gyms g ON g.id = m.gym_id
         WHERE m.id = $1 AND m.gym_id = $2${access.sql}
@@ -678,8 +692,13 @@ router.post(
       if (!member || member.deleted_at) {
         return res.status(404).json({ error: 'Member not found.' });
       }
-      if (!member.phone) {
-        return res.status(400).json({ error: 'This member has no phone number.' });
+      if (!memberReachable(member)) {
+        return res.status(400).json({
+          error: 'This member has no phone number or linked Telegram account.',
+        });
+      }
+      if (!isMemberMessagingConfigured(member)) {
+        return res.status(503).json({ error: 'Messaging is not configured on this server.' });
       }
 
       const passVersion = Number(member.pass_version) || 1;
@@ -692,14 +711,10 @@ router.post(
         return res.status(503).json({ error: 'Pass links are not configured on this server.' });
       }
 
-      const smsResult = await smsMemberPassLink(
-        { id: member.id, name: member.name, phone: member.phone },
-        member.gym_name || 'your gym',
-        passUrl
-      );
+      const smsResult = await smsMemberPassLink(member, member.gym_name || 'your gym', passUrl);
       if (!smsResult?.ok) {
         return res.status(502).json({
-          error: smsResult?.error || 'Could not send the pass SMS. Try again.',
+          error: smsResult?.error || 'Could not send the pass link. Try again.',
         });
       }
 
@@ -709,10 +724,70 @@ router.post(
         entityType: 'member',
         entityId: member.id,
         entityLabel: member.name,
-        details: { pass_version: passVersion },
+        details: { pass_version: passVersion, channel: smsResult.channel || 'sms' },
       });
 
-      res.json({ ok: true, phone: member.phone });
+      res.json({
+        ok: true,
+        phone: member.phone,
+        channel: smsResult.channel || 'sms',
+      });
+    } catch (error) {
+      next(error);
+    }
+  }
+);
+
+/**
+ * POST /api/members/:id/telegram/link-token
+ * Staff: generate a one-time Telegram deep link for member linking.
+ */
+router.post(
+  '/:id/telegram/link-token',
+  requireActiveSubscription,
+  validateParams(idParamSchema),
+  async (req, res, next) => {
+    const gymId = req.user.gym_id;
+    const { id } = req.params;
+
+    try {
+      if (!isTelegramConfigured()) {
+        return res.status(503).json({ error: 'Telegram is not configured on this server.' });
+      }
+
+      const access = await memberBranchClause(req);
+      if (access.error) {
+        return res.status(400).json({ error: access.error });
+      }
+
+      const result = await db.query(
+        `
+        SELECT m.id, m.name, m.deleted_at, m.telegram_chat_id, m.telegram_linked_at
+        FROM Members m
+        WHERE m.id = $1 AND m.gym_id = $2${access.sql}
+        `,
+        [id, gymId, ...access.params]
+      );
+      const member = result.rows[0];
+      if (!member || member.deleted_at) {
+        return res.status(404).json({ error: 'Member not found.' });
+      }
+
+      const link = await createLinkToken(member.id);
+      if (!link.link) {
+        return res.status(503).json({ error: 'Telegram bot username is not configured on this server.' });
+      }
+
+      res.json({
+        ok: true,
+        member_id: member.id,
+        token: link.token,
+        link: link.link,
+        expires_at: link.expires_at,
+        expires_in_seconds: link.expires_in_seconds,
+        already_linked: Boolean(member.telegram_chat_id),
+        telegram_linked_at: member.telegram_linked_at,
+      });
     } catch (error) {
       next(error);
     }
@@ -924,9 +999,10 @@ router.post('/:id/renew', requireActiveSubscription, validateParams(idParamSchem
     const renewedMember = updatedMember.rows[0];
     let sms_sent = false;
     let sms_error = null;
-    if (renewedMember.phone) {
-      if (!isSmsConfigured()) {
-        sms_error = 'SMS is not configured on this server.';
+    let message_channel = null;
+    if (memberReachable(renewedMember)) {
+      if (!isMemberMessagingConfigured(renewedMember)) {
+        sms_error = 'Messaging is not configured on this server.';
       } else {
         try {
           const contact = await getGymOwnerContact(gym_id);
@@ -940,15 +1016,17 @@ router.post('/:id/renew', requireActiveSubscription, validateParams(idParamSchem
             passUrl,
           });
           sms_sent = Boolean(smsResult?.ok);
+          message_channel = smsResult?.channel || null;
           if (!sms_sent) {
             sms_error =
-              smsResult?.error && !['already_sent_today', 'no_phone', 'invalid_phone'].includes(smsResult.error)
+              smsResult?.error &&
+              !['already_sent_today', 'no_phone', 'no_contact', 'invalid_phone'].includes(smsResult.error)
                 ? smsResult.error
-                : 'Renewal SMS could not be delivered.';
+                : 'Renewal message could not be delivered.';
           }
         } catch (err) {
-          console.error('[SMS] Member renewal confirmation failed:', err.message);
-          sms_error = err.message || 'Renewal SMS could not be delivered.';
+          console.error('[Message] Member renewal confirmation failed:', err.message);
+          sms_error = err.message || 'Renewal message could not be delivered.';
         }
       }
     }
@@ -957,6 +1035,7 @@ router.post('/:id/renew', requireActiveSubscription, validateParams(idParamSchem
       member: renewedMember,
       payment: paymentResult.rows[0],
       sms_sent,
+      message_channel,
       sms_error,
     });
   } catch (error) {

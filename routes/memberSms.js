@@ -39,6 +39,7 @@ router.get('/', validateQuery(memberSmsQuerySchema), async (req, res, next) => {
   const gymId = req.user.gym_id;
   const { page, limit, offset } = parsePaginationQuery(req.query);
   const typeFilter = String(req.query.type || 'all').toLowerCase();
+  const channelFilter = String(req.query.channel || 'all').toLowerCase();
   const search = String(req.query.search || '').trim();
 
   try {
@@ -62,6 +63,11 @@ router.get('/', validateQuery(memberSmsQuerySchema), async (req, res, next) => {
     if (typeFilter !== 'all' && MEMBER_SMS_TYPES.includes(typeFilter)) {
       conditions.push(`s.message_type = $${params.length + 1}`);
       params.push(typeFilter);
+    }
+
+    if (channelFilter === 'sms' || channelFilter === 'telegram') {
+      conditions.push(`s.channel = $${params.length + 1}`);
+      params.push(channelFilter);
     }
 
     if (search) {
@@ -88,6 +94,8 @@ router.get('/', validateQuery(memberSmsQuerySchema), async (req, res, next) => {
       SELECT
         s.id,
         s.recipient_phone,
+        s.recipient_address,
+        s.channel,
         s.message_type,
         s.entity_id AS member_id,
         s.message_id,

@@ -14,6 +14,24 @@ const {
 } = require('../utils/memberPass');
 const { memberPhotoToDataUrl } = require('../utils/memberPhotos');
 const { publicMemberPassLimiter } = require('../middleware/rateLimiters');
+const { isTelegramConfigured, botUsername } = require('../utils/telegramBot');
+const { createLinkToken } = require('../utils/telegramLink');
+
+async function loadMemberByPassCode(code) {
+  const result = await db.query(
+    `
+    SELECT m.id, m.gym_id, m.name, m.phone, m.photo_url, m.pass_version, m.deleted_at, m.status,
+           m.end_date, m.telegram_chat_id, m.telegram_linked_at, m.preferred_channel,
+           g.name AS gym_name, b.name AS branch_name
+    FROM Members m
+    JOIN Gyms g ON g.id = m.gym_id
+    LEFT JOIN Branches b ON b.id = m.branch_id
+    WHERE m.pass_public_code = $1
+    `,
+    [code]
+  );
+  return result.rows[0] || null;
+}
 
 async function buildPassPayload(member, gymId) {
   const passVersion = Number(member.pass_version) || 1;
@@ -33,6 +51,12 @@ async function buildPassPayload(member, gymId) {
     pass_version: passVersion,
     qr_data_url,
     gym_name: member.gym_name || null,
+    telegram: {
+      configured: isTelegramConfigured(),
+      bot_username: botUsername() || null,
+      linked: Boolean(member.telegram_chat_id),
+      linked_at: member.telegram_linked_at || null,
+    },
     member: {
       id: member.id,
       name: member.name,
@@ -59,18 +83,7 @@ router.get('/member-pass', publicMemberPassLimiter, async (req, res, next) => {
         return res.status(400).json({ error: 'Invalid pass link.', code: 'PASS_INVALID' });
       }
 
-      const result = await db.query(
-        `
-        SELECT m.id, m.gym_id, m.name, m.phone, m.photo_url, m.pass_version, m.deleted_at, m.status,
-               m.end_date, g.name AS gym_name, b.name AS branch_name
-        FROM Members m
-        JOIN Gyms g ON g.id = m.gym_id
-        LEFT JOIN Branches b ON b.id = m.branch_id
-        WHERE m.pass_public_code = $1
-        `,
-        [code]
-      );
-      const member = result.rows[0];
+      const member = await loadMemberByPassCode(code);
       if (!member || member.deleted_at) {
         return res.status(404).json({
           error: 'This pass is no longer valid.',
@@ -93,7 +106,8 @@ router.get('/member-pass', publicMemberPassLimiter, async (req, res, next) => {
     const result = await db.query(
       `
       SELECT m.id, m.name, m.phone, m.photo_url, m.pass_version, m.deleted_at, m.status,
-             m.end_date, g.name AS gym_name, b.name AS branch_name
+             m.end_date, m.telegram_chat_id, m.telegram_linked_at, m.preferred_channel,
+             g.name AS gym_name, b.name AS branch_name
       FROM Members m
       JOIN Gyms g ON g.id = m.gym_id
       LEFT JOIN Branches b ON b.id = m.branch_id
@@ -116,6 +130,56 @@ router.get('/member-pass', publicMemberPassLimiter, async (req, res, next) => {
     }
 
     res.json(await buildPassPayload(member, verified.gymId));
+  } catch (error) {
+    next(error);
+  }
+});
+
+/**
+ * POST /api/public/member-pass/telegram-link?code=
+ * Member self-service: create a one-time Telegram deep link from their pass page.
+ */
+router.post('/member-pass/telegram-link', publicMemberPassLimiter, async (req, res, next) => {
+  try {
+    if (!isTelegramConfigured()) {
+      return res.status(503).json({ error: 'Telegram is not configured on this server.' });
+    }
+
+    const code = normalizePassPublicCode(req.query.code || req.body?.code);
+    if (!code || code.length < 6 || code.length > 16) {
+      return res.status(400).json({ error: 'Invalid pass link.', code: 'PASS_INVALID' });
+    }
+
+    const member = await loadMemberByPassCode(code);
+    if (!member || member.deleted_at) {
+      return res.status(404).json({
+        error: 'This pass is no longer valid.',
+        code: 'PASS_MEMBER_MISSING',
+      });
+    }
+
+    if (member.telegram_chat_id) {
+      return res.json({
+        ok: true,
+        already_linked: true,
+        linked_at: member.telegram_linked_at,
+        bot_username: botUsername() || null,
+      });
+    }
+
+    const link = await createLinkToken(member.id);
+    if (!link.link) {
+      return res.status(503).json({ error: 'Telegram bot username is not configured on this server.' });
+    }
+
+    res.json({
+      ok: true,
+      link: link.link,
+      token: link.token,
+      expires_at: link.expires_at,
+      expires_in_seconds: link.expires_in_seconds,
+      bot_username: botUsername() || null,
+    });
   } catch (error) {
     next(error);
   }

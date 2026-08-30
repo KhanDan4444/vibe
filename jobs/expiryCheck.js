@@ -253,7 +253,7 @@ async function runDailyExpiryCheck() {
       UPDATE Members
       SET status = $1
       WHERE end_date < CURRENT_DATE AND LOWER(status) = $2 AND deleted_at IS NULL
-      RETURNING id, name, phone, gym_id, end_date;
+      RETURNING id, name, phone, gym_id, end_date, telegram_chat_id, preferred_channel;
     `;
     const expiredResult = await db.query(autoExpireQuery, [
       MEMBER_STATUS.EXPIRED,
@@ -268,7 +268,7 @@ async function runDailyExpiryCheck() {
     }
 
     const expiringSoonQuery = `
-      SELECT m.id, m.name, m.phone, m.gym_id, m.end_date
+      SELECT m.id, m.name, m.phone, m.gym_id, m.end_date, m.telegram_chat_id, m.preferred_channel
       FROM Members m
       WHERE m.deleted_at IS NULL
         AND m.end_date > CURRENT_DATE
@@ -293,7 +293,7 @@ async function runDailyExpiryCheck() {
     }
 
     const expiringTodayQuery = `
-      SELECT id, name, phone, gym_id, end_date
+      SELECT id, name, phone, gym_id, end_date, telegram_chat_id, preferred_channel
       FROM Members
       WHERE deleted_at IS NULL
         AND end_date = CURRENT_DATE

@@ -48,7 +48,6 @@ app.use(helmet({ crossOriginResourcePolicy: { policy: 'cross-origin' } }));
 app.use(express.json({ limit: '4mb' }));
 app.use(cookieParser());
 app.use(createCorsMiddleware(allowedOrigins));
-app.use('/api', apiLimiter);
 
 async function initializeDatabase() {
   try {
@@ -104,7 +103,11 @@ const gymTeamRoutes = require('./routes/gymTeam');
 const auditLogRoutes = require('./routes/auditLogs');
 const branchRoutes = require('./routes/branches');
 const memberSmsRoutes = require('./routes/memberSms');
+const telegramRoutes = require('./routes/telegram');
+const { ensureWebhookRegistered } = require('./utils/telegramBot');
 
+app.use('/api/telegram', telegramRoutes);
+app.use('/api', apiLimiter);
 app.use('/api/auth', authRoutes);
 app.use('/api/plans', planRoutes);
 app.use('/api/members', memberRoutes);
@@ -187,6 +190,15 @@ const server = app.listen(PORT, async () => {
   }
 
   startScheduler();
+
+  try {
+    const webhook = await ensureWebhookRegistered();
+    if (webhook.ok) {
+      console.log(`[Telegram] Webhook registered: ${webhook.url}`);
+    }
+  } catch (err) {
+    console.warn('[Telegram] Webhook registration skipped:', err.message);
+  }
 });
 
 process.on('SIGTERM', () => shutdown(server, 'SIGTERM'));
