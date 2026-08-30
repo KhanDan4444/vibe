@@ -62,7 +62,7 @@ async function sendSms(to, message) {
 }
 
 function buildOtpMessage(code, options = {}) {
-  const prefix = options.prefix || 'ንቁ: Your verification code is';
+  const prefix = options.prefix || 'Your verification code is';
   const postfix = options.postfix || '';
   return `${prefix} ${code}${postfix}`.trim();
 }

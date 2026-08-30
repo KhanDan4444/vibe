@@ -30,8 +30,8 @@ function otpSmsOptions(purpose) {
   return {
     prefix:
       purpose === PURPOSE.GYM_SIGNUP
-        ? 'ንቁ: Your registration code is'
-        : 'ንቁ: Your password reset code is',
+        ? 'Your registration code is'
+        : 'Your password reset code is',
     postfix: '',
   };
 }

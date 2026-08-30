@@ -7,7 +7,6 @@ const express = require('express');
 const router = express.Router();
 const { sendMessage, isTelegramConfigured, botUsername } = require('../utils/telegramBot');
 const { consumeLinkToken, unlinkTelegramChat } = require('../utils/telegramLink');
-const { SMS_BRAND } = require('../utils/brand');
 
 function verifyWebhookSecret(req) {
   const expected = process.env.TELEGRAM_WEBHOOK_SECRET?.trim();
@@ -58,7 +57,7 @@ router.post('/webhook', async (req, res, next) => {
           : 'Open the Telegram link from your gym to connect your membership.';
         await sendMessage(
           chatId,
-          `${SMS_BRAND}: Welcome! ${hint} Once linked, pass links and renewal reminders arrive here.`
+          `Welcome! ${hint} Once linked, pass links and renewal reminders arrive here.`
         );
         return res.json({ ok: true });
       }
@@ -67,10 +66,10 @@ router.post('/webhook', async (req, res, next) => {
       if (result.ok) {
         await sendMessage(
           chatId,
-          `${SMS_BRAND}: Linked to ${result.gymName}.\nHi ${result.memberName}, you'll get pass links and renewal reminders here.\nSend /stop anytime to unlink.`
+          `Linked to ${result.gymName}.\nHi ${result.memberName}, you'll get pass links and renewal reminders here.\nSend /stop anytime to unlink.`
         );
       } else {
-        await sendMessage(chatId, `${SMS_BRAND}: ${linkErrorMessage(result.error)}`);
+        await sendMessage(chatId, linkErrorMessage(result.error));
       }
       return res.json({ ok: true });
     }
@@ -80,10 +79,10 @@ router.post('/webhook', async (req, res, next) => {
       if (result.ok) {
         await sendMessage(
           chatId,
-          `${SMS_BRAND}: Unlinked from ${result.member.name}. SMS reminders will be used when available.`
+          `Unlinked from ${result.member.name}. Link again from your gym to receive messages on Telegram.`
         );
       } else {
-        await sendMessage(chatId, `${SMS_BRAND}: This Telegram account is not linked to a membership.`);
+        await sendMessage(chatId, 'This Telegram account is not linked to a membership.');
       }
       return res.json({ ok: true });
     }
