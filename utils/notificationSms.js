@@ -9,6 +9,7 @@ const { sendSms, isSmsConfigured } = require('./smsProvider');
 const { sendMessage: sendTelegramMessage, isTelegramConfigured } = require('./telegramBot');
 const { normalizeEthiopianPhone } = require('./phone');
 const { ROLES } = require('./roles');
+const { SMS_BRAND } = require('./brand');
 const { isTrialSubscription } = require('./gymTrial');
 
 const MESSAGE_CHANNELS = Object.freeze({
@@ -436,8 +437,8 @@ async function smsGymLicenseDueIn3Days(gym, endDate, planName) {
   const endDisplay = formatDisplayDateFromIso(endDate);
   const isTrial = isTrialSubscription(gym);
   const message = isTrial
-    ? `Your free trial for ${gymName} ends in 3 days (${endDisplay}). Contact your platform admin to subscribe and keep access.`
-    : `Your platform license for ${gymName} (${planName || 'plan'}) ends in 3 days (${endDisplay}). Contact your administrator to renew.`;
+    ? `${SMS_BRAND}: Your free trial for ${gymName} ends in 3 days (${endDisplay}). Contact your platform admin to subscribe and keep access.`
+    : `${SMS_BRAND}: Your platform license for ${gymName} (${planName || 'plan'}) ends in 3 days (${endDisplay}). Contact your administrator to renew.`;
   return deliverSms({
     to: phone,
     message,
@@ -454,8 +455,8 @@ async function smsGymLicenseExpiresToday(gym) {
   const gymName = gym.name || contact?.gym_name || 'your gym';
   const isTrial = isTrialSubscription(gym);
   const message = isTrial
-    ? `Your free trial for ${gymName} ends today. Contact your platform admin to subscribe before access is paused.`
-    : `Your platform license for ${gymName} expires today. Renew now to avoid interruption.`;
+    ? `${SMS_BRAND}: Your free trial for ${gymName} ends today. Contact your platform admin to subscribe before access is paused.`
+    : `${SMS_BRAND}: Your platform license for ${gymName} expires today. Renew now to avoid interruption.`;
   return deliverSms({
     to: phone,
     message,
@@ -473,8 +474,8 @@ async function smsGymLicenseExpired(gym, endDate) {
   const endDisplay = formatDisplayDateFromIso(endDate);
   const isTrial = isTrialSubscription(gym);
   const message = isTrial
-    ? `Your free trial for ${gymName} ended on ${endDisplay}. Contact your platform admin to subscribe and restore access.`
-    : `Your platform license for ${gymName} expired on ${endDisplay}. Contact your administrator to restore access.`;
+    ? `${SMS_BRAND}: Your free trial for ${gymName} ended on ${endDisplay}. Contact your platform admin to subscribe and restore access.`
+    : `${SMS_BRAND}: Your platform license for ${gymName} expired on ${endDisplay}. Contact your administrator to restore access.`;
   return deliverSms({
     to: phone,
     message,
@@ -490,7 +491,7 @@ async function smsGymLicenseRenewed(gym, endDate, planName) {
   if (!phone) return { ok: false, error: 'no_phone' };
   const gymName = gym.name || contact?.gym_name || 'your gym';
   const ends = formatDisplayDateFromIso(endDate) || 'soon';
-  const message = `Your platform license for ${gymName} (${planName || 'plan'}) has been renewed. New term ends on ${ends}.`;
+  const message = `${SMS_BRAND}: Your platform license for ${gymName} (${planName || 'plan'}) has been renewed. New term ends on ${ends}.`;
   return deliverSms({
     to: phone,
     message,
