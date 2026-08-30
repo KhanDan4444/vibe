@@ -285,7 +285,9 @@ router.post('/enroll', requireActiveSubscription, validateBody(enrollMemberSchem
           if (!sms_sent) {
             sms_error =
               smsResult?.error &&
-              !['already_sent_today', 'no_phone', 'no_contact', 'invalid_phone'].includes(smsResult.error)
+              !['already_sent_today', 'no_phone', 'no_contact', 'invalid_phone', 'telegram_not_linked'].includes(
+                smsResult.error
+              )
                 ? smsResult.error
                 : 'Welcome message could not be delivered.';
           }
@@ -606,7 +608,7 @@ router.post(
 
       let sms_sent = false;
       let message_channel = null;
-      if (memberReachable(member) && (isSmsConfigured() || isTelegramConfigured())) {
+      if (memberReachable(member) && isTelegramConfigured()) {
         const passUrl = await buildPublicPassUrl({
           gymId,
           memberId: member.id,
@@ -669,8 +671,8 @@ router.post(
     const { id } = req.params;
 
     try {
-      if (!isSmsConfigured() && !isTelegramConfigured()) {
-        return res.status(503).json({ error: 'Messaging is not configured on this server.' });
+      if (!isTelegramConfigured()) {
+        return res.status(503).json({ error: 'Telegram is not configured on this server.' });
       }
 
       const access = await memberBranchClause(req);
@@ -694,11 +696,8 @@ router.post(
       }
       if (!memberReachable(member)) {
         return res.status(400).json({
-          error: 'This member has no phone number or linked Telegram account.',
+          error: 'This member has not linked Telegram yet. Use Link Telegram on their pass.',
         });
-      }
-      if (!isMemberMessagingConfigured(member)) {
-        return res.status(503).json({ error: 'Messaging is not configured on this server.' });
       }
 
       const passVersion = Number(member.pass_version) || 1;
@@ -778,11 +777,19 @@ router.post(
         return res.status(503).json({ error: 'Telegram bot username is not configured on this server.' });
       }
 
+      const qr_data_url = await QRCode.toDataURL(link.link, {
+        errorCorrectionLevel: 'M',
+        margin: 1,
+        width: 220,
+        color: { dark: '#0f172a', light: '#ffffff' },
+      });
+
       res.json({
         ok: true,
         member_id: member.id,
         token: link.token,
         link: link.link,
+        qr_data_url,
         expires_at: link.expires_at,
         expires_in_seconds: link.expires_in_seconds,
         already_linked: Boolean(member.telegram_chat_id),
@@ -1020,7 +1027,9 @@ router.post('/:id/renew', requireActiveSubscription, validateParams(idParamSchem
           if (!sms_sent) {
             sms_error =
               smsResult?.error &&
-              !['already_sent_today', 'no_phone', 'no_contact', 'invalid_phone'].includes(smsResult.error)
+              !['already_sent_today', 'no_phone', 'no_contact', 'invalid_phone', 'telegram_not_linked'].includes(
+                smsResult.error
+              )
                 ? smsResult.error
                 : 'Renewal message could not be delivered.';
           }

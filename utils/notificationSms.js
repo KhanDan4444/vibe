@@ -258,92 +258,59 @@ async function deliverMessage({
 }
 
 /**
- * Pick Telegram when linked and preferred; otherwise SMS.
+ * Member notifications use Telegram only (SMS reserved for OTP + gym license alerts).
  * @param {{ telegram_chat_id?: number|null, preferred_channel?: string|null, phone?: string|null }} member
  */
 function resolveMemberChannel(member) {
   const chatId = member?.telegram_chat_id;
-  const pref = String(member?.preferred_channel || MESSAGE_CHANNELS.SMS).toLowerCase();
-  if (chatId && pref !== MESSAGE_CHANNELS.SMS && isTelegramConfigured()) {
+  if (chatId && isTelegramConfigured()) {
     return {
       channel: MESSAGE_CHANNELS.TELEGRAM,
       to: String(chatId),
     };
   }
   return {
-    channel: MESSAGE_CHANNELS.SMS,
-    to: member?.phone || null,
+    channel: null,
+    to: null,
   };
 }
 
 /**
- * True when member can receive via Telegram or SMS.
- * @param {{ phone?: string|null, telegram_chat_id?: number|null, preferred_channel?: string|null }} member
+ * True when member has linked Telegram and the bot is configured.
+ * @param {{ telegram_chat_id?: number|null }} member
  */
 function memberReachable(member) {
-  const route = resolveMemberChannel(member);
-  if (route.channel === MESSAGE_CHANNELS.TELEGRAM && route.to) return true;
-  return Boolean(normalizeEthiopianPhone(member?.phone));
+  const chatId = member?.telegram_chat_id;
+  return Boolean(chatId && isTelegramConfigured());
 }
 
 /**
- * Whether the resolved delivery channel is configured on this server.
- * @param {{ phone?: string|null, telegram_chat_id?: number|null, preferred_channel?: string|null }} member
+ * Whether member Telegram messaging is available on this server.
  */
-function isMemberMessagingConfigured(member) {
-  const route = resolveMemberChannel(member);
-  if (route.channel === MESSAGE_CHANNELS.TELEGRAM) return isTelegramConfigured();
-  return isSmsConfigured();
+function isMemberMessagingConfigured(_member) {
+  return isTelegramConfigured();
 }
 
 /**
- * Deliver to Telegram when linked; fall back to SMS on failure or when SMS-only.
+ * Deliver member messages via Telegram only — no SMS fallback.
  * @param {{ id: number, phone?: string|null, telegram_chat_id?: number|null, preferred_channel?: string|null }} member
  */
 async function deliverMemberMessage(member, { message, messageType, skipDailyDedupe = false }) {
   const route = resolveMemberChannel(member);
 
-  if (route.channel === MESSAGE_CHANNELS.TELEGRAM && route.to) {
-    const result = await deliverMessage({
-      channel: MESSAGE_CHANNELS.TELEGRAM,
-      to: route.to,
-      message,
-      messageType,
-      entityType: 'member',
-      entityId: member.id,
-      skipDailyDedupe,
-      memberPhone: member.phone || null,
-    });
-    if (result.ok || result.error === 'already_sent_today') {
-      return result;
-    }
-    if (member.phone && isSmsConfigured()) {
-      console.warn(
-        `[Message] Telegram failed for member ${member.id} (${result.error}); falling back to SMS`
-      );
-      return deliverSms({
-        to: member.phone,
-        message,
-        messageType,
-        entityType: 'member',
-        entityId: member.id,
-        skipDailyDedupe,
-      });
-    }
-    return result;
+  if (route.channel !== MESSAGE_CHANNELS.TELEGRAM || !route.to) {
+    return { ok: false, error: 'telegram_not_linked' };
   }
 
-  if (!member.phone) {
-    return { ok: false, error: 'no_phone' };
-  }
-
-  return deliverSms({
-    to: member.phone,
+  return deliverMessage({
+    channel: MESSAGE_CHANNELS.TELEGRAM,
+    to: route.to,
     message,
     messageType,
     entityType: 'member',
     entityId: member.id,
     skipDailyDedupe,
+    memberPhone: member.phone || null,
   });
 }
 
@@ -407,8 +374,7 @@ async function smsMemberRenewed(member, gymName, endDate, opts = {}) {
     .filter(Boolean)[0] || 'there';
   const ends = formatDisplayDateFromIso(endDate) || 'soon';
   let message = `Hi ${firstName}, your membership at ${gymName} has been renewed. New term ends on ${ends}. Thank you!`;
-  const route = resolveMemberChannel(member);
-  if (opts.passUrl && route.channel === MESSAGE_CHANNELS.TELEGRAM) {
+  if (opts.passUrl) {
     message = `${message}\n\nYour check-in pass: ${opts.passUrl}`;
   }
   return deliverMemberMessage(member, {
@@ -434,8 +400,7 @@ async function smsMemberEnrolled(member, gymName, term = {}) {
     : '';
   const planBit = planLabel ? `Your ${planLabel} membership plan` : 'Your membership';
   let message = `Hi ${firstName}, welcome to ${gymName}. ${planBit} is active until ${ends}. We are glad to have you!`;
-  const route = resolveMemberChannel(member);
-  if (term.passUrl && route.channel === MESSAGE_CHANNELS.TELEGRAM) {
+  if (term.passUrl) {
     message = `${message}\n\nYour check-in pass: ${term.passUrl}`;
   }
   return deliverMemberMessage(member, {
