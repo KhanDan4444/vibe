@@ -4,14 +4,20 @@
  */
 const rateLimit = require('express-rate-limit');
 
-function createLimiter({ windowMs, max, message }) {
+function createLimiter({ windowMs, max, message, skip }) {
   return rateLimit({
     windowMs,
     max,
     standardHeaders: true,
     legacyHeaders: false,
     message: { error: message },
+    skip,
   });
+}
+
+function isAuthOrHealthRequest(req) {
+  const path = (req.originalUrl || `${req.baseUrl || ''}${req.path || ''}`).split('?')[0];
+  return path.startsWith('/api/auth') || path === '/api/health';
 }
 
 /** Brute-force protection for login — 10 attempts per IP per 15 minutes (prod). */
@@ -77,11 +83,12 @@ const changePasswordLimiter = createLimiter({
   message: 'Too many password change attempts. Please try again later.',
 });
 
-/** General API abuse protection — 300 requests per IP per 15 minutes. */
+/** General API abuse protection — auth routes use dedicated limiters instead. */
 const apiLimiter = createLimiter({
   windowMs: 15 * 60 * 1000,
-  max: 300,
+  max: process.env.NODE_ENV === 'production' ? 600 : 3000,
   message: 'Too many requests. Please slow down.',
+  skip: isAuthOrHealthRequest,
 });
 
 /** Public member pass page — 60 per IP per 15 minutes (prod). */
