@@ -6,7 +6,7 @@
 const db = require('../config/db');
 const { formatDisplayDateFromIso } = require('./localDate');
 const { sendSms, isSmsConfigured } = require('./smsProvider');
-const { sendMessage: sendTelegramMessage, isTelegramConfigured } = require('./telegramBot');
+const { sendMessage: sendTelegramMessage, isTelegramConfigured, passOpenKeyboard } = require('./telegramBot');
 const { normalizeEthiopianPhone } = require('./phone');
 const { ROLES } = require('./roles');
 const { SMS_BRAND } = require('./brand');
@@ -150,6 +150,8 @@ async function deliverTelegram({
   entityId,
   skipDailyDedupe = false,
   memberPhone = null,
+  replyMarkup = null,
+  disableWebPagePreview = false,
 }) {
   const chatId = String(to ?? '').trim();
   if (!chatId || !/^-?\d+$/.test(chatId)) {
@@ -168,7 +170,10 @@ async function deliverTelegram({
   }
 
   try {
-    const result = await sendTelegramMessage(chatId, message);
+    const result = await sendTelegramMessage(to, message, {
+      reply_markup: replyMarkup || undefined,
+      disable_web_page_preview: disableWebPagePreview,
+    });
     await logMessage({
       channel: MESSAGE_CHANNELS.TELEGRAM,
       recipientPhone: memberPhone,
@@ -236,6 +241,8 @@ async function deliverMessage({
   entityId,
   skipDailyDedupe = false,
   memberPhone = null,
+  replyMarkup = null,
+  disableWebPagePreview = false,
 }) {
   if (channel === MESSAGE_CHANNELS.TELEGRAM) {
     return deliverTelegram({
@@ -246,6 +253,8 @@ async function deliverMessage({
       entityId,
       skipDailyDedupe,
       memberPhone,
+      replyMarkup,
+      disableWebPagePreview,
     });
   }
   return deliverSms({
@@ -296,7 +305,13 @@ function isMemberMessagingConfigured(_member) {
  * Deliver member messages via Telegram only — no SMS fallback.
  * @param {{ id: number, phone?: string|null, telegram_chat_id?: number|null, preferred_channel?: string|null }} member
  */
-async function deliverMemberMessage(member, { message, messageType, skipDailyDedupe = false }) {
+async function deliverMemberMessage(member, {
+  message,
+  messageType,
+  skipDailyDedupe = false,
+  replyMarkup = null,
+  disableWebPagePreview = false,
+}) {
   const route = resolveMemberChannel(member);
 
   if (route.channel !== MESSAGE_CHANNELS.TELEGRAM || !route.to) {
@@ -312,6 +327,8 @@ async function deliverMemberMessage(member, { message, messageType, skipDailyDed
     entityId: member.id,
     skipDailyDedupe,
     memberPhone: member.phone || null,
+    replyMarkup,
+    disableWebPagePreview,
   });
 }
 
@@ -335,8 +352,9 @@ async function getGymOwnerContact(gymId) {
  */
 async function smsMemberDueSoon(member, gymName) {
   if (!memberReachable(member)) return { ok: false, error: 'no_contact' };
+  const firstName = memberFirstName(member.name);
   const endDate = formatDisplayDateFromIso(member.end_date) || 'soon';
-  const message = `Hi ${member.name}, your membership at ${gymName} ends on ${endDate}.`;
+  const message = `Hi ${firstName}, your membership at ${gymName} ends on ${endDate}. Renew at the front desk to stay active.`;
   return deliverMemberMessage(member, {
     message,
     messageType: SMS_TYPES.MEMBER_DUE_SOON,
@@ -345,7 +363,8 @@ async function smsMemberDueSoon(member, gymName) {
 
 async function smsMemberExpiresToday(member, gymName) {
   if (!memberReachable(member)) return { ok: false, error: 'no_contact' };
-  const message = `Hi ${member.name}, your membership at ${gymName} expires today. Renew at the front desk to stay active.`;
+  const firstName = memberFirstName(member.name);
+  const message = `Hi ${firstName}, your membership at ${gymName} expires today. Renew at the front desk to stay active.`;
   return deliverMemberMessage(member, {
     message,
     messageType: SMS_TYPES.MEMBER_EXPIRES_TODAY,
@@ -354,7 +373,8 @@ async function smsMemberExpiresToday(member, gymName) {
 
 async function smsMemberExpired(member, gymName) {
   if (!memberReachable(member)) return { ok: false, error: 'no_contact' };
-  const message = `Hi ${member.name}, your membership at ${gymName} has expired. Contact the gym to renew.`;
+  const firstName = memberFirstName(member.name);
+  const message = `Hi ${firstName}, your membership at ${gymName} has expired. Contact the gym to renew.`;
   return deliverMemberMessage(member, {
     message,
     messageType: SMS_TYPES.MEMBER_EXPIRED,
@@ -376,11 +396,13 @@ async function smsMemberRenewed(member, gymName, endDate, opts = {}) {
   const ends = formatDisplayDateFromIso(endDate) || 'soon';
   let message = `Hi ${firstName}, your membership at ${gymName} has been renewed. New term ends on ${ends}. Thank you!`;
   if (opts.passUrl) {
-    message = `${message}\n\nYour check-in pass: ${opts.passUrl}`;
+    message = `${message}\n\nHere is your check-in pass:`;
   }
   return deliverMemberMessage(member, {
     message,
     messageType: SMS_TYPES.MEMBER_RENEWED,
+    replyMarkup: opts.passUrl ? passOpenKeyboard(opts.passUrl) : null,
+    disableWebPagePreview: !opts.passUrl,
   });
 }
 
@@ -402,11 +424,13 @@ async function smsMemberEnrolled(member, gymName, term = {}) {
   const planBit = planLabel ? `Your ${planLabel} membership plan` : 'Your membership';
   let message = `Hi ${firstName}, welcome to ${gymName}. ${planBit} is active until ${ends}. We are glad to have you!`;
   if (term.passUrl) {
-    message = `${message}\n\nYour check-in pass: ${term.passUrl}`;
+    message = `${message}\n\nHere is your check-in pass:`;
   }
   return deliverMemberMessage(member, {
     message,
     messageType: SMS_TYPES.MEMBER_ENROLLED,
+    replyMarkup: term.passUrl ? passOpenKeyboard(term.passUrl) : null,
+    disableWebPagePreview: !term.passUrl,
   });
 }
 
@@ -452,7 +476,7 @@ function buildTelegramLinkWelcomeMessage({ memberName, gymName, planName, planDu
     `We are glad to have you!`;
 
   if (passUrl) {
-    message += `\n\nHere is your Check-in pass:\n${passUrl}`;
+    message += `\n\nHere is your Check-in pass:`;
   }
 
   return message;
@@ -478,6 +502,8 @@ async function sendTelegramLinkWelcome(member, gymName, term = {}, passUrl = nul
     message,
     messageType: SMS_TYPES.MEMBER_TELEGRAM_LINKED,
     skipDailyDedupe: true,
+    replyMarkup: passUrl ? passOpenKeyboard(passUrl) : null,
+    disableWebPagePreview: !passUrl,
   });
 }
 
@@ -490,11 +516,13 @@ async function sendTelegramLinkWelcome(member, gymName, term = {}, passUrl = nul
 async function smsMemberPassLink(member, gymName, passUrl) {
   if (!memberReachable(member)) return { ok: false, error: 'no_contact' };
   const firstName = memberFirstName(member.name);
-  const message = `Hi ${firstName},\n\nHere is your Check-in pass:\n${passUrl}`;
+  const message = `Hi ${firstName},\n\nHere is your check-in pass:`;
   return deliverMemberMessage(member, {
     message,
     messageType: SMS_TYPES.MEMBER_PASS_LINK,
     skipDailyDedupe: true,
+    replyMarkup: passOpenKeyboard(passUrl),
+    disableWebPagePreview: false,
   });
 }
 
@@ -592,6 +620,8 @@ module.exports = {
   smsMemberPassLink,
   sendTelegramLinkWelcome,
   buildTelegramLinkWelcomeMessage,
+  memberFirstName,
+  membershipPlanTypeLabel,
   smsGymLicenseDueIn3Days,
   smsGymLicenseExpiresToday,
   smsGymLicenseExpired,

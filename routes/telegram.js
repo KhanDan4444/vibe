@@ -8,7 +8,16 @@ const router = express.Router();
 const { sendMessage, isTelegramConfigured, botUsername } = require('../utils/telegramBot');
 const { consumeLinkToken, unlinkTelegramChat } = require('../utils/telegramLink');
 const { buildPublicPassUrl } = require('../utils/memberPass');
-const { sendTelegramLinkWelcome } = require('../utils/notificationSms');
+const { sendTelegramLinkWelcome, smsMemberPassLink } = require('../utils/notificationSms');
+const {
+  NOT_LINKED,
+  getLinkedMemberByChatId,
+  buildHelpMessage,
+  buildUnknownMessage,
+  buildBareStartMessage,
+  sendMemberStatus,
+  parseBotCommand,
+} = require('../utils/telegramMemberBot');
 
 function verifyWebhookSecret(req) {
   const expected = process.env.TELEGRAM_WEBHOOK_SECRET?.trim();
@@ -32,6 +41,49 @@ function linkErrorMessage(code) {
   }
 }
 
+async function handlePassCommand(chatId) {
+  const member = await getLinkedMemberByChatId(chatId);
+  if (!member) {
+    await sendMessage(chatId, NOT_LINKED);
+    return;
+  }
+
+  const passUrl = await buildPublicPassUrl({ memberId: member.id });
+  if (!passUrl) {
+    await sendMessage(chatId, 'Check-in pass links are not available right now. Please contact your gym.');
+    return;
+  }
+
+  const result = await smsMemberPassLink(
+    {
+      id: member.id,
+      name: member.name,
+      phone: member.phone,
+      telegram_chat_id: chatId,
+    },
+    member.gym_name || 'your gym',
+    passUrl
+  );
+
+  if (!result?.ok) {
+    await sendMessage(chatId, 'Could not send your check-in pass. Please try again or contact your gym.');
+  }
+}
+
+async function handleStatusCommand(chatId) {
+  const member = await getLinkedMemberByChatId(chatId);
+  if (!member) {
+    await sendMessage(chatId, NOT_LINKED);
+    return;
+  }
+  await sendMemberStatus(chatId, member);
+}
+
+async function handleHelpCommand(chatId) {
+  const member = await getLinkedMemberByChatId(chatId);
+  await sendMessage(chatId, buildHelpMessage({ linked: Boolean(member) }));
+}
+
 /**
  * POST /api/telegram/webhook
  * Telegram Bot API update handler.
@@ -49,18 +101,12 @@ router.post('/webhook', async (req, res, next) => {
 
     const chatId = message.chat.id;
     const text = message.text.trim();
+    const parsed = parseBotCommand(text);
 
-    if (text.startsWith('/start')) {
-      const token = text.split(/\s+/)[1]?.trim();
+    if (parsed?.command === 'start') {
+      const token = parsed.args || text.split(/\s+/)[1]?.trim();
       if (!token) {
-        const username = botUsername();
-        const hint = username
-          ? `Open the link from your gym or visit t.me/${username} with your personal link code.`
-          : 'Open the Telegram link from your gym to connect your membership.';
-        await sendMessage(
-          chatId,
-          `Welcome! ${hint} Once linked, pass links and renewal reminders arrive here.`
-        );
+        await sendMessage(chatId, buildBareStartMessage());
         return res.json({ ok: true });
       }
 
@@ -87,6 +133,21 @@ router.post('/webhook', async (req, res, next) => {
       return res.json({ ok: true });
     }
 
+    if (parsed?.command === 'pass') {
+      await handlePassCommand(chatId);
+      return res.json({ ok: true });
+    }
+
+    if (parsed?.command === 'status') {
+      await handleStatusCommand(chatId);
+      return res.json({ ok: true });
+    }
+
+    if (parsed?.command === 'help') {
+      await handleHelpCommand(chatId);
+      return res.json({ ok: true });
+    }
+
     if (text === '/stop') {
       const result = await unlinkTelegramChat(chatId);
       if (result.ok) {
@@ -100,6 +161,12 @@ router.post('/webhook', async (req, res, next) => {
       return res.json({ ok: true });
     }
 
+    if (text.startsWith('/')) {
+      await sendMessage(chatId, buildUnknownMessage());
+      return res.json({ ok: true });
+    }
+
+    await sendMessage(chatId, buildUnknownMessage());
     return res.json({ ok: true });
   } catch (err) {
     next(err);

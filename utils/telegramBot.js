@@ -63,8 +63,9 @@ async function callTelegramApi(method, body) {
 /**
  * @param {number|string} chatId
  * @param {string} text
+ * @param {{ reply_markup?: object, parse_mode?: string, disable_web_page_preview?: boolean }} [options]
  */
-async function sendMessage(chatId, text) {
+async function sendMessage(chatId, text, options = {}) {
   const message = String(text || '').trim();
   if (!message) {
     const err = new Error('Telegram message is empty.');
@@ -72,16 +73,41 @@ async function sendMessage(chatId, text) {
     throw err;
   }
 
-  const payload = await callTelegramApi('sendMessage', {
+  const body = {
     chat_id: chatId,
     text: message,
-    disable_web_page_preview: false,
-  });
+    disable_web_page_preview: options.disable_web_page_preview ?? false,
+  };
+  if (options.reply_markup) body.reply_markup = options.reply_markup;
+  if (options.parse_mode) body.parse_mode = options.parse_mode;
+
+  const payload = await callTelegramApi('sendMessage', body);
 
   return {
     message_id: payload.result?.message_id != null ? String(payload.result.message_id) : null,
     chat_id: String(chatId),
   };
+}
+
+function passOpenKeyboard(passUrl) {
+  const url = String(passUrl || '').trim();
+  if (!url) return null;
+  return {
+    inline_keyboard: [[{ text: 'Open check-in pass', url }]],
+  };
+}
+
+const BOT_COMMANDS = [
+  { command: 'start', description: 'Link membership (use gym QR link)' },
+  { command: 'pass', description: 'Resend check-in pass' },
+  { command: 'status', description: 'Membership details' },
+  { command: 'help', description: 'How to use this bot' },
+];
+
+async function setMyCommands() {
+  if (!isTelegramConfigured()) return { ok: false, skipped: true };
+  await callTelegramApi('setMyCommands', { commands: BOT_COMMANDS });
+  return { ok: true };
 }
 
 /**
@@ -96,6 +122,7 @@ async function ensureWebhookRegistered() {
   if (secret) body.secret_token = secret;
 
   await callTelegramApi('setWebhook', body);
+  await setMyCommands();
   return { ok: true, url: webhookUrl };
 }
 
@@ -103,5 +130,7 @@ module.exports = {
   isTelegramConfigured,
   botUsername,
   sendMessage,
+  passOpenKeyboard,
+  setMyCommands,
   ensureWebhookRegistered,
 };

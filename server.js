@@ -104,7 +104,7 @@ const auditLogRoutes = require('./routes/auditLogs');
 const branchRoutes = require('./routes/branches');
 const memberSmsRoutes = require('./routes/memberSms');
 const telegramRoutes = require('./routes/telegram');
-const { ensureWebhookRegistered } = require('./utils/telegramBot');
+const { ensureWebhookRegistered, setMyCommands } = require('./utils/telegramBot');
 
 app.use('/api/telegram', telegramRoutes);
 app.use('/api', apiLimiter);
@@ -198,6 +198,15 @@ const server = app.listen(PORT, async () => {
     }
   } catch (err) {
     console.warn('[Telegram] Webhook registration skipped:', err.message);
+  }
+
+  try {
+    const commands = await setMyCommands();
+    if (commands.ok) {
+      console.log('[Telegram] Bot commands registered.');
+    }
+  } catch (err) {
+    console.warn('[Telegram] Bot commands skipped:', err.message);
   }
 });
 
