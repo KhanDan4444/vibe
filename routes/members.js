@@ -66,7 +66,7 @@ const {
   smsMemberEnrolled,
 } = require('../utils/notificationSms');
 const { PAYMENT_SOURCES } = require('../utils/paymentSources');
-const { createLinkToken } = require('../utils/telegramLink');
+const { createLinkToken, unlinkTelegramMember } = require('../utils/telegramLink');
 const { assertMemberPhoneAvailable } = require('../utils/memberPhone');
 
 router.use(auth, checkSubscription, requireGymAccess);
@@ -819,6 +819,63 @@ router.post(
         already_linked: Boolean(member.telegram_chat_id),
         telegram_linked_at: member.telegram_linked_at,
       });
+    } catch (error) {
+      next(error);
+    }
+  }
+);
+
+/**
+ * DELETE /api/members/:id/telegram
+ * Staff: unlink Telegram from a member.
+ */
+router.delete(
+  '/:id/telegram',
+  requireActiveSubscription,
+  validateParams(idParamSchema),
+  async (req, res, next) => {
+    const gymId = req.user.gym_id;
+    const { id } = req.params;
+
+    try {
+      const access = await memberBranchClause(req);
+      if (access.error) {
+        return res.status(400).json({ error: access.error });
+      }
+
+      const result = await db.query(
+        `
+        SELECT m.id, m.name, m.deleted_at, m.telegram_chat_id
+        FROM Members m
+        WHERE m.id = $1 AND m.gym_id = $2${access.sql}
+        `,
+        [id, gymId, ...access.params]
+      );
+      const member = result.rows[0];
+      if (!member || member.deleted_at) {
+        return res.status(404).json({ error: 'Member not found.' });
+      }
+      if (!member.telegram_chat_id) {
+        return res.status(400).json({
+          error: 'Telegram is not linked for this member.',
+          code: 'TELEGRAM_NOT_LINKED',
+        });
+      }
+
+      const unlink = await unlinkTelegramMember(member.id);
+      if (!unlink.ok) {
+        return res.status(400).json({ error: 'Could not unlink Telegram.', code: unlink.error });
+      }
+
+      await recordAuditLog({
+        req,
+        action: ACTIONS.MEMBER_TELEGRAM_UNLINKED,
+        entityType: 'member',
+        entityId: member.id,
+        entityLabel: member.name,
+      });
+
+      res.json({ ok: true, member_id: member.id });
     } catch (error) {
       next(error);
     }

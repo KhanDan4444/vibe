@@ -16,6 +16,7 @@ const { sendMessage: sendTelegramMessage, isTelegramConfigured } = require('./te
 const { ACTIONS, recordAuditLog } = require('./auditLog');
 
 const STATION_DEVICE_COOKIE = 'vibe_station_trust';
+const STATION_DEVICE_HEADER = 'x-station-device-token';
 const OTP_TTL_MS = 10 * 60 * 1000;
 const OTP_COOLDOWN_MS = 60 * 1000;
 const DEVICE_MAX_AGE_MS = 10 * 365 * 24 * 60 * 60 * 1000;
@@ -37,6 +38,14 @@ function generateDeviceToken() {
 }
 
 function readDeviceToken(req) {
+  const fromHeader = req.headers?.[STATION_DEVICE_HEADER];
+  if (typeof fromHeader === 'string' && fromHeader.length >= 32) {
+    return fromHeader.trim();
+  }
+  const fromBody = req.body?.device_token;
+  if (typeof fromBody === 'string' && fromBody.length >= 32) {
+    return fromBody.trim();
+  }
   const raw = req.cookies?.[STATION_DEVICE_COOKIE];
   return typeof raw === 'string' && raw.length >= 32 ? raw.trim() : null;
 }
@@ -357,7 +366,7 @@ async function verifyStationOtp(stationToken, { sessionId, otp, phone }, res) {
     [sessionId]
   );
 
-  await issueDeviceTrust(session.member_id, res);
+  const deviceToken = await issueDeviceTrust(session.member_id, res);
 
   const checkIn = await performStationCheckIn(station, session.member_id, { viaOtp: true });
   if (!checkIn.ok) {
@@ -369,6 +378,7 @@ async function verifyStationOtp(stationToken, { sessionId, otp, phone }, res) {
     ...checkIn,
     member_name: session.member_name,
     trusted: true,
+    device_token: deviceToken,
   };
 }
 
@@ -478,6 +488,7 @@ async function trustedStationCheckIn(stationToken, req, res) {
 
 module.exports = {
   STATION_DEVICE_COOKIE,
+  STATION_DEVICE_HEADER,
   clearDeviceCookie,
   clearStationDevicesForMember,
   getStationSession,

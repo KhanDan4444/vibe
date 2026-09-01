@@ -30,6 +30,7 @@ const ACTIONS = Object.freeze({
   ATTENDANCE_SETTINGS_UPDATED: 'attendance.settings_updated',
   MEMBER_PASS_REGENERATED: 'member.pass_regenerated',
   MEMBER_PASS_SMS_SENT: 'member.pass_sms_sent',
+  MEMBER_TELEGRAM_UNLINKED: 'member.telegram_unlinked',
   BRANCH_STATION_REGENERATED: 'branch.station_regenerated',
 });
 

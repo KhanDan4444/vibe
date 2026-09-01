@@ -43,7 +43,7 @@ function validateCorsConfig(allowedOrigins) {
 
 function createCorsMiddleware(allowedOrigins) {
   const allowHeaders =
-    'Origin, X-Requested-With, Content-Type, Accept, Authorization, X-Admin-Setup-Secret';
+    'Origin, X-Requested-With, Content-Type, Accept, Authorization, X-Admin-Setup-Secret, X-Station-Device-Token';
   const allowMethods = 'GET, POST, PUT, DELETE, PATCH, OPTIONS';
 
   return (req, res, next) => {

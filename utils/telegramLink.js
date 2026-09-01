@@ -196,6 +196,41 @@ async function unlinkTelegramChat(chatId) {
   return { ok: true, member: result.rows[0] };
 }
 
+/**
+ * Staff-initiated unlink for a member by id.
+ * @param {number} memberId
+ */
+async function unlinkTelegramMember(memberId) {
+  const id = Number(memberId);
+  if (!Number.isFinite(id)) {
+    return { ok: false, error: 'invalid_member_id' };
+  }
+
+  const result = await db.query(
+    `
+    UPDATE Members
+    SET telegram_chat_id = NULL,
+        telegram_linked_at = NULL,
+        preferred_channel = NULL
+    WHERE id = $1 AND deleted_at IS NULL AND telegram_chat_id IS NOT NULL
+    RETURNING id, name
+    `,
+    [id]
+  );
+
+  if (!result.rows[0]) {
+    const exists = await db.query(`SELECT id FROM Members WHERE id = $1 AND deleted_at IS NULL`, [id]);
+    if (!exists.rows[0]) {
+      return { ok: false, error: 'member_not_found' };
+    }
+    return { ok: false, error: 'not_linked' };
+  }
+
+  await clearStationDevicesForMember(id);
+
+  return { ok: true, member: result.rows[0] };
+}
+
 module.exports = {
   TOKEN_TTL_MS,
   isTelegramConfigured,
@@ -203,4 +238,5 @@ module.exports = {
   createLinkToken,
   consumeLinkToken,
   unlinkTelegramChat,
+  unlinkTelegramMember,
 };
