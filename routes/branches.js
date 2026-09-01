@@ -20,6 +20,8 @@ const {
   reassignBranchStaffSchema,
 } = require('../validation/schemas');
 const { assertBranchInGym } = require('../utils/branches');
+const { buildStationPassPayload, regenerateBranchStation } = require('../utils/stationPass');
+const { ACTIONS, recordAuditLog } = require('../utils/auditLog');
 
 router.use(auth, requireGymAccess, checkSubscription);
 
@@ -212,5 +214,55 @@ router.patch('/:id', requireGymOwner, requireActiveSubscription, validateParams(
     next(error);
   }
 });
+
+/** GET /api/gym/branches/:id/station-pass — QR for self check-in poster */
+router.get('/:id/station-pass', validateParams(idParamSchema), async (req, res, next) => {
+  const branchId = parseInt(req.params.id, 10);
+  const gymId = req.user.gym_id;
+
+  try {
+    if (isGymStaff(req.user.role) && req.user.branch_id !== branchId) {
+      return res.status(403).json({ error: 'You can only view the station QR for your branch.' });
+    }
+
+    const payload = await buildStationPassPayload(branchId, gymId);
+    res.json(payload);
+  } catch (error) {
+    if (error.statusCode === 404) {
+      return res.status(404).json({ error: error.message });
+    }
+    next(error);
+  }
+});
+
+/** POST /api/gym/branches/:id/station-pass/regenerate — owner only */
+router.post(
+  '/:id/station-pass/regenerate',
+  requireGymOwner,
+  requireActiveSubscription,
+  validateParams(idParamSchema),
+  async (req, res, next) => {
+    const branchId = parseInt(req.params.id, 10);
+    const gymId = req.user.gym_id;
+
+    try {
+      const payload = await regenerateBranchStation(branchId, gymId);
+      await recordAuditLog({
+        req,
+        action: ACTIONS.BRANCH_STATION_REGENERATED,
+        entityType: 'branch',
+        entityId: branchId,
+        entityLabel: payload.branch_name,
+        details: { station_version: payload.station_version },
+      });
+      res.json(payload);
+    } catch (error) {
+      if (error.statusCode === 404) {
+        return res.status(404).json({ error: error.message });
+      }
+      next(error);
+    }
+  }
+);
 
 module.exports = router;

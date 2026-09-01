@@ -6,6 +6,7 @@
 const crypto = require('crypto');
 const db = require('../config/db');
 const { botUsername, isTelegramConfigured } = require('./telegramBot');
+const { clearStationDevicesForMember } = require('./stationSelfCheckIn');
 
 const TOKEN_TTL_MS = 15 * 60 * 1000;
 const TOKEN_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
@@ -179,7 +180,7 @@ async function unlinkTelegramChat(chatId) {
     UPDATE Members
     SET telegram_chat_id = NULL,
         telegram_linked_at = NULL,
-        preferred_channel = 'sms'
+        preferred_channel = NULL
     WHERE telegram_chat_id = $1 AND deleted_at IS NULL
     RETURNING id, name
     `,
@@ -189,6 +190,8 @@ async function unlinkTelegramChat(chatId) {
   if (!result.rows[0]) {
     return { ok: false, error: 'not_linked' };
   }
+
+  await clearStationDevicesForMember(result.rows[0].id);
 
   return { ok: true, member: result.rows[0] };
 }

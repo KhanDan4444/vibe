@@ -78,6 +78,7 @@ const attendanceSettingsSchema = z.object({
   week_starts_on: z.enum(['monday', 'sunday']).optional(),
   one_checkin_per_day: z.boolean().optional(),
   over_limit_policy: z.enum(['block', 'warn_allow']).optional(),
+  station_self_checkin: z.boolean().optional(),
 });
 
 async function loadLiveMember(gymId, memberId, scope) {
@@ -113,10 +114,19 @@ async function visitSummaryForMember(member, gymId, settings) {
   };
 }
 
+async function getGymCheckInSettings(gymId) {
+  const base = await getGymAttendanceSettings(gymId);
+  const row = await db.query(`SELECT station_self_checkin FROM Gyms WHERE id = $1`, [gymId]);
+  return {
+    ...base,
+    station_self_checkin: Boolean(row.rows[0]?.station_self_checkin),
+  };
+}
+
 /** GET /api/check-ins/settings */
 router.get('/settings', async (req, res, next) => {
   try {
-    const settings = await getGymAttendanceSettings(req.user.gym_id);
+    const settings = await getGymCheckInSettings(req.user.gym_id);
     res.json({ settings, canManage: isGymOwner(req.user.role) });
   } catch (error) {
     next(error);
@@ -131,7 +141,7 @@ router.patch(
   validateBody(attendanceSettingsSchema),
   async (req, res, next) => {
     try {
-      const current = await getGymAttendanceSettings(req.user.gym_id);
+      const current = await getGymCheckInSettings(req.user.gym_id);
       const visits =
         req.body.visits_per_week !== undefined ? req.body.visits_per_week : current.visits_per_week;
       const weekStarts =
@@ -144,6 +154,10 @@ router.patch(
         req.body.over_limit_policy !== undefined
           ? req.body.over_limit_policy
           : current.over_limit_policy;
+      const stationSelf =
+        req.body.station_self_checkin !== undefined
+          ? req.body.station_self_checkin
+          : current.station_self_checkin;
 
       await db.query(
         `
@@ -151,12 +165,13 @@ router.patch(
         SET visits_per_week = $1,
             week_starts_on = $2,
             one_checkin_per_day = $3,
-            over_limit_policy = $4
-        WHERE id = $5
+            over_limit_policy = $4,
+            station_self_checkin = $5
+        WHERE id = $6
         `,
-        [visits, weekStarts, onePerDay, overLimit, req.user.gym_id]
+        [visits, weekStarts, onePerDay, overLimit, stationSelf, req.user.gym_id]
       );
-      const settings = await getGymAttendanceSettings(req.user.gym_id);
+      const settings = await getGymCheckInSettings(req.user.gym_id);
       res.json({ settings });
     } catch (error) {
       next(error);
