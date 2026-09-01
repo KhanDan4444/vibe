@@ -24,9 +24,11 @@ const {
   endOfWeek,
   toDateString,
   mapCheckInRow,
+  hasCheckedInOnLocalDay,
 } = require('../utils/checkIns');
 const { isGymOwner } = require('../utils/roles');
 const { verifyMemberPass, passFingerprint } = require('../utils/memberPass');
+const { todayLocalString, checkInOnCalendarDaySql } = require('../utils/localDate');
 
 router.use(auth, requireGymAccess, checkSubscription);
 
@@ -57,6 +59,7 @@ const listQuerySchema = z
       .optional(),
     member_id: z.coerce.number().int().positive().optional(),
     limit: z.coerce.number().int().min(1).max(200).optional().default(50),
+    branch_id: z.union([z.literal('all'), z.coerce.number().int().positive()]).optional(),
   })
   .refine((q) => !(q.from && !q.to) && !(q.to && !q.from), {
     message: 'Provide both from and to, or neither.',
@@ -195,6 +198,9 @@ router.get('/search', validateQuery(searchQuerySchema), async (req, res, next) =
     const members = [];
     for (const row of result.rows) {
       const visits = await visitSummaryForMember(row, req.user.gym_id, settings);
+      const checkedInToday = settings.one_checkin_per_day
+        ? await hasCheckedInOnLocalDay(row.id, req.user.gym_id, null)
+        : false;
       members.push({
         id: row.id,
         name: row.name,
@@ -207,6 +213,7 @@ router.get('/search', validateQuery(searchQuerySchema), async (req, res, next) =
         end_date: row.end_date,
         is_unpaid: row.is_unpaid,
         trainer_name: row.trainer_name || null,
+        checked_in_today: checkedInToday,
         ...visits,
       });
     }
@@ -251,7 +258,7 @@ router.get('/', validateQuery(listQuerySchema), async (req, res, next) => {
     const memberId = req.query.member_id || null;
     const rangeMode = Boolean(req.query.from && req.query.to);
     const memberRecentMode = Boolean(memberId) && !rangeMode && !req.query.date;
-    const date = rangeMode || memberRecentMode ? null : req.query.date || toDateString(new Date());
+    const date = rangeMode || memberRecentMode ? null : req.query.date || todayLocalString();
     let from = req.query.from || null;
     let to = req.query.to || null;
 
@@ -276,7 +283,7 @@ router.get('/', validateQuery(listQuerySchema), async (req, res, next) => {
       filters.push(`c.checked_in_at::date <= $${params.length}::date`);
     } else if (!memberRecentMode) {
       params.push(date);
-      filters.push(`c.checked_in_at::date = $${params.length}::date`);
+      filters.push(checkInOnCalendarDaySql('c.checked_in_at', params.length));
     }
 
     if (scope.branchId) {

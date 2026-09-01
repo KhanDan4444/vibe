@@ -98,11 +98,28 @@ function addCalendarDays(dateStr, days) {
   return formatLocalDate(d);
 }
 
+function appTimeZone() {
+  return process.env.APP_TIMEZONE || DEFAULT_APP_TIMEZONE;
+}
+
+/**
+ * SQL fragment: a timestamptz column falls on calendar date $dateParamIndex in app TZ.
+ * @param {string} column e.g. `c.checked_in_at`
+ * @param {number} dateParamIndex 1-based pg placeholder index for YYYY-MM-DD
+ * @param {string} [timeZone]
+ */
+function checkInOnCalendarDaySql(column, dateParamIndex, timeZone) {
+  const tz = timeZone || appTimeZone();
+  return `(${column} >= ($${dateParamIndex}::text || ' 00:00:00')::timestamp AT TIME ZONE '${tz}' AND ${column} < (($${dateParamIndex}::date + 1)::text || ' 00:00:00')::timestamp AT TIME ZONE '${tz}')`;
+}
+
 module.exports = {
   DEFAULT_APP_TIMEZONE,
   formatLocalDate,
   todayInTimeZone,
   todayLocalString,
+  appTimeZone,
+  checkInOnCalendarDaySql,
   calendarDateString,
   parseLocalDate,
   formatDisplayDateFromIso,

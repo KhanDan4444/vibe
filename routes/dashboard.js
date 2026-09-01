@@ -17,7 +17,7 @@ const { resolveBranchScope, gymBranchParams } = require('../utils/branchScope');
 const { fetchBranchComparisonMetrics } = require('../utils/branchComparison');
 const { isGymOwner } = require('../utils/roles');
 const { isTrialSubscription, trialDaysLeft } = require('../utils/gymTrial');
-const { calendarDateString } = require('../utils/localDate');
+const { calendarDateString, todayLocalString, checkInOnCalendarDaySql } = require('../utils/localDate');
 
 router.use(auth, checkSubscription, requireGymAccess);
 
@@ -44,6 +44,8 @@ router.get('/', async (req, res, next) => {
     }
 
     const qp = gymBranchParams(gym_id, scope);
+    const today = todayLocalString();
+    const checkedInDateIdx = scope.branchId ? 3 : 2;
     const mb = scope.memberBareSql;
     const ma = scope.memberSql;
     const payBranch = scope.branchId
@@ -242,10 +244,10 @@ router.get('/', async (req, res, next) => {
         SELECT COUNT(*)::int AS count
         FROM CheckIns c
         WHERE c.gym_id = $1
-          AND c.checked_in_at::date = CURRENT_DATE
           ${scope.branchId ? ' AND c.branch_id = $2' : ''}
+          AND ${checkInOnCalendarDaySql('c.checked_in_at', checkedInDateIdx)}
         `,
-        qp
+        [...qp, today]
       ),
     ]);
 

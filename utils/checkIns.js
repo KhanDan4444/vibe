@@ -4,6 +4,7 @@
  */
 
 const db = require('../config/db');
+const { todayLocalString, checkInOnCalendarDaySql } = require('./localDate');
 
 function startOfWeek(date, weekStartsOn = 'monday') {
   const d = new Date(date);
@@ -61,17 +62,23 @@ async function countVisitsInRange(memberId, gymId, rangeStart, rangeEnd, executo
   return result.rows[0]?.count ?? 0;
 }
 
-async function hasCheckedInOnLocalDay(memberId, gymId, _dayDate, executor = db) {
+async function hasCheckedInOnLocalDay(memberId, gymId, dayDate, executor = db) {
+  const day =
+    dayDate == null
+      ? todayLocalString()
+      : dayDate instanceof Date
+        ? toDateString(dayDate)
+        : String(dayDate).slice(0, 10);
   const result = await executor.query(
     `
     SELECT 1
     FROM CheckIns
     WHERE member_id = $1
       AND gym_id = $2
-      AND checked_in_at::date = CURRENT_DATE
+      AND ${checkInOnCalendarDaySql('checked_in_at', 3)}
     LIMIT 1
     `,
-    [memberId, gymId]
+    [memberId, gymId, day]
   );
   return result.rows.length > 0;
 }
