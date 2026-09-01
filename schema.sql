@@ -320,7 +320,8 @@ ALTER TABLE Gyms
     CHECK (week_starts_on IN ('monday', 'sunday')),
   ADD COLUMN IF NOT EXISTS one_checkin_per_day BOOLEAN NOT NULL DEFAULT true,
   ADD COLUMN IF NOT EXISTS over_limit_policy VARCHAR(20) NOT NULL DEFAULT 'block'
-    CHECK (over_limit_policy IN ('block', 'warn_allow'));
+    CHECK (over_limit_policy IN ('block', 'warn_allow')),
+  ADD COLUMN IF NOT EXISTS station_self_checkin BOOLEAN NOT NULL DEFAULT false;
 
 -- Default SaaS plan catalog (production + fresh installs; skipped once plans exist)
 INSERT INTO SaaSPlans (name, duration, price, description, is_active)

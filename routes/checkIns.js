@@ -115,12 +115,7 @@ async function visitSummaryForMember(member, gymId, settings) {
 }
 
 async function getGymCheckInSettings(gymId) {
-  const base = await getGymAttendanceSettings(gymId);
-  const row = await db.query(`SELECT station_self_checkin FROM Gyms WHERE id = $1`, [gymId]);
-  return {
-    ...base,
-    station_self_checkin: Boolean(row.rows[0]?.station_self_checkin),
-  };
+  return getGymAttendanceSettings(gymId);
 }
 
 /** GET /api/check-ins/settings */

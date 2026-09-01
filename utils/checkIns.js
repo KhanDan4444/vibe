@@ -32,7 +32,8 @@ function toDateString(d) {
 async function getGymAttendanceSettings(gymId, executor = db) {
   const result = await executor.query(
     `
-    SELECT visits_per_week, week_starts_on, one_checkin_per_day, over_limit_policy
+    SELECT visits_per_week, week_starts_on, one_checkin_per_day, over_limit_policy,
+           station_self_checkin
     FROM Gyms
     WHERE id = $1
     `,
@@ -44,6 +45,7 @@ async function getGymAttendanceSettings(gymId, executor = db) {
     week_starts_on: row.week_starts_on === 'sunday' ? 'sunday' : 'monday',
     one_checkin_per_day: row.one_checkin_per_day !== false,
     over_limit_policy: row.over_limit_policy === 'warn_allow' ? 'warn_allow' : 'block',
+    station_self_checkin: Boolean(row.station_self_checkin),
   };
 }
 
