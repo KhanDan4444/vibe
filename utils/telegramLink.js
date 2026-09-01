@@ -84,10 +84,14 @@ async function consumeLinkToken(token, chatId) {
 
     const tokenRow = await client.query(
       `
-      SELECT t.id, t.member_id, t.expires_at, t.used_at, m.name AS member_name, g.name AS gym_name
+      SELECT t.id, t.member_id, t.expires_at, t.used_at,
+             m.name AS member_name, m.end_date,
+             g.name AS gym_name,
+             p.name AS plan_name, p.duration AS plan_duration
       FROM TelegramLinkTokens t
       INNER JOIN Members m ON m.id = t.member_id
       INNER JOIN Gyms g ON g.id = m.gym_id
+      LEFT JOIN Plans p ON p.id = m.plan_id
       WHERE t.token = $1
       FOR UPDATE OF t
       `,
@@ -148,6 +152,9 @@ async function consumeLinkToken(token, chatId) {
       memberId: row.member_id,
       memberName: row.member_name,
       gymName: row.gym_name,
+      planName: row.plan_name || null,
+      planDuration: row.plan_duration != null ? Number(row.plan_duration) : null,
+      endDate: row.end_date || null,
     };
   } catch (err) {
     await client.query('ROLLBACK');

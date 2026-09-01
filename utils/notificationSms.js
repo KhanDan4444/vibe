@@ -24,6 +24,7 @@ const SMS_TYPES = Object.freeze({
   MEMBER_RENEWED: 'member_renewed',
   MEMBER_ENROLLED: 'member_enrolled',
   MEMBER_PASS_LINK: 'member_pass_link',
+  MEMBER_TELEGRAM_LINKED: 'member_telegram_linked',
   GYM_LICENSE_DUE_SOON: 'gym_license_due_soon',
   GYM_LICENSE_DUE_IN_3_DAYS: 'gym_license_due_in_3_days',
   GYM_LICENSE_EXPIRES_TODAY: 'gym_license_expires_today',
@@ -409,6 +410,77 @@ async function smsMemberEnrolled(member, gymName, term = {}) {
   });
 }
 
+function memberFirstName(name) {
+  return (
+    String(name || '')
+      .trim()
+      .split(/\s+/)
+      .filter(Boolean)[0] || 'there'
+  );
+}
+
+function membershipPlanTypeLabel(planName, durationMonths) {
+  const name = String(planName || '').trim();
+  const lower = name.toLowerCase();
+  if (/\bmonthly\b/.test(lower)) return 'Monthly';
+  if (/\bquarterly\b/.test(lower)) return 'Quarterly';
+  const duration = Number(durationMonths);
+  if (duration === 1) return 'Monthly';
+  if (duration === 3) return 'Quarterly';
+  if (name) {
+    const short = name.split('·')[0].trim();
+    return short || name;
+  }
+  if (Number.isFinite(duration) && duration > 0) {
+    return duration === 1 ? 'Monthly' : `${duration}-month`;
+  }
+  return 'membership';
+}
+
+/**
+ * Welcome message sent when a member links Telegram via /start token.
+ */
+function buildTelegramLinkWelcomeMessage({ memberName, gymName, planName, planDuration, endDate, passUrl }) {
+  const firstName = memberFirstName(memberName);
+  const planType = membershipPlanTypeLabel(planName, planDuration);
+  const endDisplay = formatDisplayDateFromIso(endDate) || 'soon';
+
+  let message =
+    `Hi ${firstName}, Welcome! You are linked to ${gymName}. ` +
+    `You will get your pass links and renewal reminders here. ` +
+    `Your ${planType} membership plan is active until ${endDisplay}. ` +
+    `We are glad to have you!`;
+
+  if (passUrl) {
+    message += `\n\nHere is your Check-in pass:\n${passUrl}`;
+  }
+
+  return message;
+}
+
+/**
+ * @param {{ id: number, name: string, telegram_chat_id?: number|null, preferred_channel?: string|null, phone?: string|null }} member
+ * @param {string} gymName
+ * @param {{ planName?: string|null, planDuration?: number|null, endDate?: string|null }} term
+ * @param {string|null} passUrl
+ */
+async function sendTelegramLinkWelcome(member, gymName, term = {}, passUrl = null) {
+  if (!memberReachable(member)) return { ok: false, error: 'telegram_not_linked' };
+  const message = buildTelegramLinkWelcomeMessage({
+    memberName: member.name,
+    gymName,
+    planName: term.planName,
+    planDuration: term.planDuration,
+    endDate: term.endDate,
+    passUrl,
+  });
+  return deliverMemberMessage(member, {
+    message,
+    messageType: SMS_TYPES.MEMBER_TELEGRAM_LINKED,
+    skipDailyDedupe: true,
+  });
+}
+
 /**
  * Send a link to the member’s public QR pass page (not the image).
  * @param {{ id: number, name: string, phone?: string|null, telegram_chat_id?: number|null, preferred_channel?: string|null }} member
@@ -417,11 +489,8 @@ async function smsMemberEnrolled(member, gymName, term = {}) {
  */
 async function smsMemberPassLink(member, gymName, passUrl) {
   if (!memberReachable(member)) return { ok: false, error: 'no_contact' };
-  const firstName = String(member.name || '')
-    .trim()
-    .split(/\s+/)
-    .filter(Boolean)[0] || 'there';
-  const message = `Hi ${firstName}, your ${gymName} check-in pass: ${passUrl} Show the QR at the desk when you arrive.`;
+  const firstName = memberFirstName(member.name);
+  const message = `Hi ${firstName},\n\nHere is your Check-in pass:\n${passUrl}`;
   return deliverMemberMessage(member, {
     message,
     messageType: SMS_TYPES.MEMBER_PASS_LINK,
@@ -521,6 +590,8 @@ module.exports = {
   smsMemberRenewed,
   smsMemberEnrolled,
   smsMemberPassLink,
+  sendTelegramLinkWelcome,
+  buildTelegramLinkWelcomeMessage,
   smsGymLicenseDueIn3Days,
   smsGymLicenseExpiresToday,
   smsGymLicenseExpired,

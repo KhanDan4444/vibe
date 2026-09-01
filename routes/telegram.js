@@ -7,6 +7,8 @@ const express = require('express');
 const router = express.Router();
 const { sendMessage, isTelegramConfigured, botUsername } = require('../utils/telegramBot');
 const { consumeLinkToken, unlinkTelegramChat } = require('../utils/telegramLink');
+const { buildPublicPassUrl } = require('../utils/memberPass');
+const { sendTelegramLinkWelcome } = require('../utils/notificationSms');
 
 function verifyWebhookSecret(req) {
   const expected = process.env.TELEGRAM_WEBHOOK_SECRET?.trim();
@@ -64,9 +66,20 @@ router.post('/webhook', async (req, res, next) => {
 
       const result = await consumeLinkToken(token, chatId);
       if (result.ok) {
-        await sendMessage(
-          chatId,
-          `Linked to ${result.gymName}.\nHi ${result.memberName}, you'll get pass links and renewal reminders here.\nSend /stop anytime to unlink.`
+        const passUrl = await buildPublicPassUrl({ memberId: result.memberId });
+        await sendTelegramLinkWelcome(
+          {
+            id: result.memberId,
+            name: result.memberName,
+            telegram_chat_id: chatId,
+          },
+          result.gymName,
+          {
+            planName: result.planName,
+            planDuration: result.planDuration,
+            endDate: result.endDate,
+          },
+          passUrl
         );
       } else {
         await sendMessage(chatId, linkErrorMessage(result.error));
