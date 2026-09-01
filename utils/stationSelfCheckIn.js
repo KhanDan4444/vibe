@@ -98,38 +98,7 @@ async function resolveStation(stationToken) {
   };
 }
 
-async function findMembersByPhone(gymId, phoneInput) {
-  const normalized = normalizeEthiopianPhone(phoneInput);
-  if (!normalized) return [];
-  const suffix = normalized.replace(/\D/g, '').slice(-9);
-
-  const result = await db.query(
-    `
-    SELECT m.*, p.name AS plan_name, b.name AS branch_name
-    FROM Members m
-    LEFT JOIN Plans p ON p.id = m.plan_id
-    LEFT JOIN Branches b ON b.id = m.branch_id
-    WHERE m.gym_id = $1
-      AND m.deleted_at IS NULL
-      AND m.phone IS NOT NULL
-      AND RIGHT(REGEXP_REPLACE(m.phone, '[^0-9]', '', 'g'), 9) = $2
-    ORDER BY
-      CASE WHEN m.telegram_chat_id IS NOT NULL THEN 0 ELSE 1 END,
-      m.telegram_linked_at DESC NULLS LAST,
-      m.id DESC
-    `,
-    [gymId, suffix]
-  );
-
-  return result.rows;
-}
-
-/** Prefer the Telegram-linked profile when duplicate phones exist at one gym. */
-async function findMemberByPhone(gymId, phoneInput) {
-  const rows = await findMembersByPhone(gymId, phoneInput);
-  if (!rows.length) return null;
-  return rows.find((row) => row.telegram_chat_id) || rows[0];
-}
+const { findMemberByPhone } = require('./memberPhone');
 
 async function loadTrustedMember(station, deviceToken) {
   if (!deviceToken) return null;

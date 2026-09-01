@@ -67,6 +67,7 @@ const {
 } = require('../utils/notificationSms');
 const { PAYMENT_SOURCES } = require('../utils/paymentSources');
 const { createLinkToken } = require('../utils/telegramLink');
+const { assertMemberPhoneAvailable } = require('../utils/memberPhone');
 
 router.use(auth, checkSubscription, requireGymAccess);
 
@@ -107,6 +108,17 @@ router.post('/', requireActiveSubscription, validateBody(createMemberSchema), as
     const duration = planResult.rows[0].duration;
     const end_date = calculateEndDate(start_date, duration);
     const status = deriveMemberStatusFromEndDate(end_date);
+
+    const phoneCheck = await assertMemberPhoneAvailable(gym_id, phone);
+    if (!phoneCheck.ok) {
+      return res.status(409).json({
+        error: phoneCheck.error,
+        code: phoneCheck.code,
+        field: 'phone',
+        member_id: phoneCheck.conflict?.id,
+        member_name: phoneCheck.conflict?.name,
+      });
+    }
 
     const insertQuery = `
       INSERT INTO Members (gym_id, branch_id, name, phone, plan_id, start_date, end_date, status)
@@ -170,6 +182,18 @@ router.post('/enroll', requireActiveSubscription, validateBody(enrollMemberSchem
     const { duration, price: planPrice, name: planName } = planResult.rows[0];
     const end_date = calculateEndDate(start_date, duration);
     const status = deriveMemberStatusFromEndDate(end_date);
+
+    const phoneCheck = await assertMemberPhoneAvailable(gym_id, phone);
+    if (!phoneCheck.ok) {
+      await client.query('ROLLBACK');
+      return res.status(409).json({
+        error: phoneCheck.error,
+        code: phoneCheck.code,
+        field: 'phone',
+        member_id: phoneCheck.conflict?.id,
+        member_name: phoneCheck.conflict?.name,
+      });
+    }
 
     const memberResult = await client.query(
       `
@@ -1372,6 +1396,20 @@ router.put('/:id', requireActiveSubscription, validateParams(idParamSchema), val
     await assertMemberBranchWritable(id, gym_id);
 
     const currentMember = memberCheck.rows[0];
+
+    const nextPhone = phone !== undefined ? phone : currentMember.phone;
+    if (nextPhone && nextPhone !== currentMember.phone) {
+      const phoneCheck = await assertMemberPhoneAvailable(gym_id, nextPhone, currentMember.id);
+      if (!phoneCheck.ok) {
+        return res.status(409).json({
+          error: phoneCheck.error,
+          code: phoneCheck.code,
+          field: 'phone',
+          member_id: phoneCheck.conflict?.id,
+          member_name: phoneCheck.conflict?.name,
+        });
+      }
+    }
 
     let newBranchId = currentMember.branch_id;
     if (branch_id !== undefined) {

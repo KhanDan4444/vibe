@@ -7,6 +7,7 @@
     "start": "node server.js",
     "stop": "fuser -k 5000/tcp 2>/dev/null || true",
     "db:migrate": "node scripts/migrate.js",
+    "db:phone-duplicates": "node scripts/phone-duplicates.js",
     "smoke:test": "node scripts/smoke-test.js",
     "smoke:test:otp": "node scripts/smoke-test-otp.js",
     "start:legacy": "node index.js",
