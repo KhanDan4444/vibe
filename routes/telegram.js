@@ -148,7 +148,7 @@ router.post('/webhook', async (req, res, next) => {
       return res.json({ ok: true });
     }
 
-    if (text === '/stop') {
+    if (parsed?.command === 'stop') {
       const result = await unlinkTelegramChat(chatId);
       if (result.ok) {
         await sendMessage(

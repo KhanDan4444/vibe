@@ -96,8 +96,8 @@ CREATE TABLE IF NOT EXISTS Members (
     pass_public_code VARCHAR(16),
     telegram_chat_id BIGINT,
     telegram_linked_at TIMESTAMPTZ,
-    preferred_channel VARCHAR(16) NOT NULL DEFAULT 'sms'
-      CHECK (preferred_channel IN ('sms', 'telegram', 'both')),
+    preferred_channel VARCHAR(16) DEFAULT 'sms'
+      CHECK (preferred_channel IS NULL OR preferred_channel IN ('sms', 'telegram', 'both')),
     -- Forces client-level member tracking records to remain uniform
     CONSTRAINT check_member_status_lowercase CHECK (status = LOWER(status))
 );
