@@ -170,19 +170,26 @@ async function deliverTelegram({
   }
 
   try {
-    const result = await sendTelegramMessage(to, message, {
+    const result = await sendTelegramMessage(chatId, message, {
       reply_markup: replyMarkup || undefined,
       disable_web_page_preview: disableWebPagePreview,
     });
-    await logMessage({
-      channel: MESSAGE_CHANNELS.TELEGRAM,
-      recipientPhone: memberPhone,
-      recipientAddress: chatId,
-      messageType,
-      entityType,
-      entityId,
-      messageId: result.message_id,
-    });
+    try {
+      await logMessage({
+        channel: MESSAGE_CHANNELS.TELEGRAM,
+        recipientPhone: memberPhone,
+        recipientAddress: chatId,
+        messageType,
+        entityType,
+        entityId,
+        messageId: result.message_id,
+      });
+    } catch (logErr) {
+      console.error(
+        `[Telegram] Sent ${messageType} but log insert failed entity=${entityType}:${entityId}:`,
+        logErr.message
+      );
+    }
     return { ok: true, channel: MESSAGE_CHANNELS.TELEGRAM };
   } catch (err) {
     console.error(

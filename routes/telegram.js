@@ -65,7 +65,7 @@ async function handlePassCommand(chatId) {
     passUrl
   );
 
-  if (!result?.ok) {
+  if (!result?.ok && result?.error !== 'already_sent_today') {
     await sendMessage(chatId, 'Could not send your check-in pass. Please try again or contact your gym.');
   }
 }
