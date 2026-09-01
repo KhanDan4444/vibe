@@ -9,6 +9,7 @@
     "db:migrate": "node scripts/migrate.js",
     "db:phone-duplicates": "node scripts/phone-duplicates.js",
     "db:resolve-phone-duplicate": "node scripts/resolve-phone-duplicate.js",
+    "smoke:production": "node scripts/smoke-production.js",
     "smoke:test": "node scripts/smoke-test.js",
     "smoke:test:otp": "node scripts/smoke-test-otp.js",
     "start:legacy": "node index.js",
