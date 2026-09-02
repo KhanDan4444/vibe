@@ -58,6 +58,11 @@ const memberListQuerySchema = paginationQuerySchema.extend({
   branch_id: optionalPositiveIntQuery,
 });
 
+const memberPhoneCheckQuerySchema = z.object({
+  phone: z.string().trim().min(1).max(30),
+  exclude_member_id: optionalPositiveIntQuery,
+});
+
 const ownerPaymentListQuerySchema = paginationQuerySchema.extend({
   search: optionalSearch,
   method: paymentMethodFilterSchema,
@@ -172,6 +177,7 @@ const activityQuerySchema = paginationQuerySchema.extend({
 
 module.exports = {
   memberListQuerySchema,
+  memberPhoneCheckQuerySchema,
   ownerPaymentListQuerySchema,
   adminGymListQuerySchema,
   adminPaymentListQuerySchema,

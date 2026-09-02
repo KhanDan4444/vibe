@@ -71,7 +71,7 @@ async function assertMemberPhoneAvailable(gymId, phoneInput, excludeMemberId) {
     ok: false,
     code: 'PHONE_ALREADY_USED',
     conflict: { id: conflict.id, name: conflict.name },
-    error: `This phone number is already on file for ${conflict.name}.`,
+    error: 'This phone number is already in use.',
   };
 }
 

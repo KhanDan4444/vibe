@@ -22,7 +22,7 @@ const { parsePaginationQuery, paginatedResponse } = require('../utils/pagination
 const { parseMemberListSortOrder } = require('../utils/listSortSql');
 const { buildMemberListFilters, MEMBER_IS_UNPAID_SELECT, MEMBER_LIVE_BARE_SQL, MEMBER_LIST_FROM, MEMBER_LIST_SELECT } = require('../utils/memberListSql');
 const { validateBody, validateParams, validateQuery } = require('../middleware/validate');
-const { memberListQuerySchema } = require('../validation/querySchemas');
+const { memberListQuerySchema, memberPhoneCheckQuerySchema } = require('../validation/querySchemas');
 const {
   idParamSchema,
   createMemberSchema,
@@ -448,6 +448,32 @@ router.get('/archived', validateQuery(memberListQuerySchema), async (req, res, n
     );
 
     res.json(paginatedResponse(result.rows, total, page, limit));
+  } catch (error) {
+    next(error);
+  }
+});
+
+/**
+ * GET /api/members/phone-check
+ * @description Check whether a phone number is available for enroll/edit (step 1 validation).
+ * @queryparam {String} phone
+ * @queryparam {Number} [exclude_member_id] - Ignore this member (edit flows).
+ */
+router.get('/phone-check', validateQuery(memberPhoneCheckQuerySchema), async (req, res, next) => {
+  const gym_id = req.user.gym_id;
+  const { phone, exclude_member_id: excludeMemberId } = req.query;
+
+  try {
+    const phoneCheck = await assertMemberPhoneAvailable(gym_id, phone, excludeMemberId);
+    if (phoneCheck.ok) {
+      return res.json({ available: true });
+    }
+    return res.json({
+      available: false,
+      code: phoneCheck.code,
+      member_id: phoneCheck.conflict?.id,
+      member_name: phoneCheck.conflict?.name,
+    });
   } catch (error) {
     next(error);
   }
