@@ -12,6 +12,8 @@
     "smoke:production": "node scripts/smoke-production.js",
     "smoke:test": "node scripts/smoke-test.js",
     "smoke:test:otp": "node scripts/smoke-test-otp.js",
+    "smoke:gym-signup": "node scripts/smoke-gym-signup.js",
+    "smoke:api": "node scripts/start-smoke-api.js",
     "start:legacy": "node index.js",
     "test": "echo \"Error: no test specified\" && exit 1"
   },

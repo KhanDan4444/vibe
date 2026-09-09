@@ -55,10 +55,10 @@ const otpVerifyLimiter = createLimiter({
   message: 'Too many verification attempts. Please try again later.',
 });
 
-/** Public gym signup — 3 per IP per hour. */
+/** Public gym signup — 3 per IP per hour in prod (request + verify + complete share this). */
 const publicGymSignupLimiter = createLimiter({
   windowMs: 60 * 60 * 1000,
-  max: 3,
+  max: process.env.NODE_ENV === 'production' ? 3 : 60,
   message: 'Too many signup attempts. Please try again later.',
 });
 

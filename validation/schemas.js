@@ -231,6 +231,8 @@ const adminEnrollGymSchema = z
     username,
     password,
     phone: ethiopianPhone,
+    city: trimmed(100),
+    address: optionalTrimmed(500),
     saas_plan_id: positiveInt,
     start_date: optionalDate,
     amount: z.coerce.number().positive().optional(),

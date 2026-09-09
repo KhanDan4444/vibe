@@ -230,6 +230,8 @@ router.post('/gyms/enroll', validateBody(adminEnrollGymSchema), async (req, res,
     username,
     password,
     phone,
+    city,
+    address,
     saas_plan_id,
     amount,
     date,
@@ -243,8 +245,14 @@ router.post('/gyms/enroll', validateBody(adminEnrollGymSchema), async (req, res,
     await client.query('BEGIN');
 
     const gymResult = await client.query(
-      'INSERT INTO Gyms (name, owner_name, phone) VALUES ($1, $2, $3) RETURNING *',
-      [gym_name.trim(), owner_name.trim(), phone?.trim() || null]
+      'INSERT INTO Gyms (name, owner_name, phone, city, address) VALUES ($1, $2, $3, $4, $5) RETURNING *',
+      [
+        gym_name.trim(),
+        owner_name.trim(),
+        phone?.trim() || null,
+        city?.trim() || null,
+        address?.trim() || null,
+      ]
     );
     const gymId = gymResult.rows[0].id;
 

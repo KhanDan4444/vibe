@@ -166,9 +166,45 @@ router.post(
   }
 );
 
+/**
+ * Free-trial length for self-service signup.
+ * v1: disabled by default (0). Re-enable in v2 via GYM_SIGNUP_TRIAL_DAYS > 0.
+ */
 function publicSignupTrialDays() {
-  const parsed = parseInt(process.env.GYM_SIGNUP_TRIAL_DAYS || '30', 10);
-  return Number.isNaN(parsed) || parsed < 1 ? 30 : parsed;
+  const raw = process.env.GYM_SIGNUP_TRIAL_DAYS;
+  if (raw == null || String(raw).trim() === '') return 0;
+  const parsed = parseInt(raw, 10);
+  return Number.isNaN(parsed) || parsed < 1 ? 0 : parsed;
+}
+
+/**
+ * When free trial is off, assign the cheapest active SaaS plan
+ * (or GYM_SIGNUP_DEFAULT_SAAS_PLAN_ID when set).
+ */
+async function resolvePublicSignupSaasPlanId(client) {
+  const fromEnv = parseInt(process.env.GYM_SIGNUP_DEFAULT_SAAS_PLAN_ID || '', 10);
+  if (!Number.isNaN(fromEnv) && fromEnv > 0) {
+    const check = await client.query(
+      'SELECT id FROM SaaSPlans WHERE id = $1 AND is_active = true',
+      [fromEnv]
+    );
+    if (check.rows.length === 0) {
+      const err = new Error('Configured signup SaaS plan is missing or inactive.');
+      err.statusCode = 503;
+      throw err;
+    }
+    return fromEnv;
+  }
+
+  const result = await client.query(
+    `SELECT id FROM SaaSPlans WHERE is_active = true ORDER BY price ASC, id ASC LIMIT 1`
+  );
+  if (result.rows.length === 0) {
+    const err = new Error('No active SaaS plan available for gym signup.');
+    err.statusCode = 503;
+    throw err;
+  }
+  return result.rows[0].id;
 }
 
 /**
@@ -205,7 +241,8 @@ router.post(
 
 /**
  * POST /api/auth/gym-signup/complete
- * Verify OTP and create gym + owner on a free trial license (no plan payment at signup).
+ * Verify OTP and create gym + owner. v1 assigns a default SaaS plan (no payment at signup).
+ * Set GYM_SIGNUP_TRIAL_DAYS > 0 to restore free-trial signup in v2.
  */
 router.post(
   '/gym-signup/complete',
@@ -250,7 +287,7 @@ router.post(
 
       await client.query('BEGIN');
       const trialDays = publicSignupTrialDays();
-      const { gym, owner, subscription } = await registerGymWithOwner(client, {
+      const registerPayload = {
         gym_name,
         owner_name,
         email,
@@ -259,12 +296,18 @@ router.post(
         phone,
         city,
         address,
-        trial_days: trialDays,
-      });
+      };
+      if (trialDays > 0) {
+        registerPayload.trial_days = trialDays;
+      } else {
+        registerPayload.saas_plan_id = await resolvePublicSignupSaasPlanId(client);
+      }
+      const { gym, owner, subscription } = await registerGymWithOwner(client, registerPayload);
       await linkSignupOtpToGym(gym.id, phone);
       await consumeSession(sessionId);
       await client.query('COMMIT');
 
+      const isTrial = Boolean(subscription.is_trial);
       res.status(201).json({
         message: 'Gym registered. Sign in with your username and password.',
         gym: { id: gym.id, name: gym.name, city: gym.city, address: gym.address },
@@ -273,8 +316,8 @@ router.post(
           plan_name: subscription.plan.name,
           start_date: subscription.start_date,
           end_date: subscription.end_date,
-          is_trial: Boolean(subscription.is_trial),
-          trial_days: subscription.is_trial ? trialDays : undefined,
+          is_trial: isTrial,
+          trial_days: isTrial ? trialDays : undefined,
         },
       });
     } catch (error) {
