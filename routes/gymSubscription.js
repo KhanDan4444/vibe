@@ -22,9 +22,11 @@ router.get('/', async (req, res, next) => {
   try {
     const result = await db.query(
       `
-      SELECT g.name, g.subscription_status, gs.plan, gs.saas_plan_id, gs.end_date
+      SELECT g.name, g.subscription_status, gs.plan, gs.saas_plan_id, gs.end_date,
+             sp.duration AS saas_plan_duration
       FROM Gyms g
       LEFT JOIN GymSubscriptions gs ON gs.gym_id = g.id
+      LEFT JOIN SaaSPlans sp ON sp.id = gs.saas_plan_id
       WHERE g.id = $1
       `,
       [req.user.gym_id]
@@ -38,6 +40,7 @@ router.get('/', async (req, res, next) => {
     const isTrial = isTrialSubscription(row);
     const licenseEndDate = calendarDateString(row.end_date) || null;
     const daysLeft = isTrial && licenseEndDate ? trialDaysLeft(licenseEndDate) : null;
+    const duration = row.saas_plan_duration != null ? parseInt(row.saas_plan_duration, 10) : null;
 
     res.json({
       gymName: row.name,
@@ -46,6 +49,7 @@ router.get('/', async (req, res, next) => {
       trialEndDate: isTrial ? licenseEndDate : undefined,
       trialDaysLeft: isTrial && daysLeft != null && daysLeft >= 0 ? daysLeft : isTrial ? 0 : undefined,
       licensePlanName: row.plan || null,
+      licensePlanDuration: Number.isFinite(duration) && duration > 0 ? duration : null,
       licenseEndDate,
     });
   } catch (error) {
