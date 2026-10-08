@@ -30,6 +30,35 @@ function trialDaysLeft(endDate, todayStr = todayLocalString()) {
   return Math.round((endLocal.getTime() - todayLocal.getTime()) / 86400000);
 }
 
+/**
+ * Inclusive calendar length of a trial term (start…end).
+ * @param {string | Date | null | undefined} startDate
+ * @param {string | Date | null | undefined} endDate
+ */
+function trialTotalDays(startDate, endDate) {
+  const start = calendarDateString(startDate);
+  const end = calendarDateString(endDate);
+  if (!start || !end) return null;
+  const startLocal = parseLocalDate(start);
+  const endLocal = parseLocalDate(end);
+  const days = Math.round((endLocal.getTime() - startLocal.getTime()) / 86400000) + 1;
+  return days > 0 ? days : null;
+}
+
+/**
+ * Inclusive days counted since trial start through today (1 on start day).
+ * @param {string | Date | null | undefined} startDate
+ * @param {string} [todayStr]
+ */
+function trialDaysUsed(startDate, todayStr = todayLocalString()) {
+  const start = calendarDateString(startDate);
+  if (!start) return null;
+  const startLocal = parseLocalDate(start);
+  const todayLocal = parseLocalDate(todayStr);
+  const days = Math.round((todayLocal.getTime() - startLocal.getTime()) / 86400000) + 1;
+  return days < 1 ? 0 : days;
+}
+
 /** SQL on gym list subquery alias `g` (saas_plan_id / saas_plan_name / saas_end_date). */
 const GYM_IS_TRIAL_SQL = `
   g.saas_plan_id IS NULL
@@ -60,6 +89,8 @@ module.exports = {
   GYM_TRIAL_ENDING_WEEK_DAYS,
   isTrialSubscription,
   trialDaysLeft,
+  trialTotalDays,
+  trialDaysUsed,
   GYM_IS_TRIAL_SQL,
   GYM_TRIAL_ENDING_SQL,
   GYM_ON_TRIAL_SQL,
