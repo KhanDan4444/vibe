@@ -233,7 +233,9 @@ const adminEnrollGymSchema = z
     phone: ethiopianPhone,
     city: trimmed(100),
     address: optionalTrimmed(500),
-    saas_plan_id: positiveInt,
+    saas_plan_id: optionalPositiveInt,
+    /** When set, enroll on Free Trial (no SaaS plan / payment). */
+    trial_days: z.coerce.number().int().min(1).max(366).optional(),
     start_date: optionalDate,
     amount: z.coerce.number().positive().optional(),
     date: optionalDate,
@@ -241,6 +243,16 @@ const adminEnrollGymSchema = z
     skip_payment: z.boolean().optional(),
   })
   .superRefine((data, ctx) => {
+    const isTrial = data.trial_days != null && Number(data.trial_days) > 0;
+    if (!isTrial && data.saas_plan_id == null) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'Select a SaaS plan or free trial.',
+        path: ['saas_plan_id'],
+      });
+      return;
+    }
+    if (isTrial) return;
     refineAdminEnrollGymPayment(data, ctx);
   });
 

@@ -1,0 +1,18 @@
+---
+description: Cross-repo agent memory lives in vibe-frontend project-log
+alwaysApply: true
+---
+
+# Project log (agent memory)
+
+Shared conventions for vibe / vibe-frontend / vibe-mobile live in:
+
+**`/home/daniel/vibe-frontend/docs/project-log.md`**
+
+Also: `/home/daniel/vibe-frontend/docs/MESSAGE_CATALOG.md`, `/home/daniel/vibe-frontend/docs/SRS.md`.
+
+Before messaging, signup/trial, auth, or API behavior that affects clients: read **Decision index** + **Do not regress** in the project log.
+
+**End of session:** append a session block to that `project-log.md` (template inside the file). Do not rewrite old entries.
+
+Local pointer: `docs/PROJECT_LOG.md`.

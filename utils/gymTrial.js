@@ -43,6 +43,12 @@ const GYM_TRIAL_ENDING_SQL = `
   AND g.saas_end_date::date BETWEEN CURRENT_DATE AND (CURRENT_DATE + INTERVAL '${GYM_TRIAL_ENDING_WEEK_DAYS} days')
 `;
 
+/** All active gyms currently on a free trial (any remaining days). */
+const GYM_ON_TRIAL_SQL = `
+  LOWER(g.subscription_status) = 'active'
+  AND (${GYM_IS_TRIAL_SQL})
+`;
+
 /** Raw join form for expiry cron queries (alias gs). */
 const GS_IS_TRIAL_SQL = `
   gs.saas_plan_id IS NULL
@@ -56,5 +62,6 @@ module.exports = {
   trialDaysLeft,
   GYM_IS_TRIAL_SQL,
   GYM_TRIAL_ENDING_SQL,
+  GYM_ON_TRIAL_SQL,
   GS_IS_TRIAL_SQL,
 };

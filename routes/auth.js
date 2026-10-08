@@ -168,7 +168,7 @@ router.post(
 
 /**
  * Free-trial length for self-service signup.
- * v1: disabled by default (0). Re-enable in v2 via GYM_SIGNUP_TRIAL_DAYS > 0.
+ * Off by default (0). Set GYM_SIGNUP_TRIAL_DAYS > 0 to enable free-trial signup.
  */
 function publicSignupTrialDays() {
   const raw = process.env.GYM_SIGNUP_TRIAL_DAYS;
@@ -241,8 +241,7 @@ router.post(
 
 /**
  * POST /api/auth/gym-signup/complete
- * Verify OTP and create gym + owner. v1 assigns a default SaaS plan (no payment at signup).
- * Set GYM_SIGNUP_TRIAL_DAYS > 0 to restore free-trial signup in v2.
+ * Verify OTP and create gym + owner. Assigns default SaaS plan unless GYM_SIGNUP_TRIAL_DAYS > 0.
  */
 router.post(
   '/gym-signup/complete',

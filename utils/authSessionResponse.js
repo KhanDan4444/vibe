@@ -10,14 +10,31 @@ async function buildAuthSessionPayload(user) {
 
   if (user.gym_id) {
     const gymResult = await db.query(
-      'SELECT name, subscription_status FROM Gyms WHERE id = $1',
+      `
+      SELECT g.name, g.subscription_status, gs.plan, gs.saas_plan_id, gs.end_date
+      FROM Gyms g
+      LEFT JOIN GymSubscriptions gs ON gs.gym_id = g.id
+      WHERE g.id = $1
+      `,
       [user.gym_id]
     );
     if (gymResult.rows.length > 0) {
       const { describeGymSubscriptionAccess } = require('./gymSubscriptionStatus');
+      const { isTrialSubscription, trialDaysLeft } = require('./gymTrial');
+      const { calendarDateString } = require('./localDate');
+      const row = gymResult.rows[0];
+      const access = describeGymSubscriptionAccess(row.subscription_status);
+      const isTrial = isTrialSubscription(row);
+      const licenseEndDate = calendarDateString(row.end_date) || null;
+      const daysLeft = isTrial && licenseEndDate ? trialDaysLeft(licenseEndDate) : null;
       subscription = {
-        gymName: gymResult.rows[0].name,
-        ...describeGymSubscriptionAccess(gymResult.rows[0].subscription_status),
+        gymName: row.name,
+        ...access,
+        isTrial,
+        trialEndDate: isTrial ? licenseEndDate : undefined,
+        trialDaysLeft: isTrial && daysLeft != null && daysLeft >= 0 ? daysLeft : isTrial ? 0 : undefined,
+        licensePlanName: row.plan || null,
+        licenseEndDate,
       };
     }
     if (user.branch_id) {

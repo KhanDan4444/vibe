@@ -17,7 +17,7 @@ const { ROLES } = require('../utils/roles');
 const { DUE_SOON_DAYS, GYM_LICENSE_DUE_SOON_DAYS } = require('../utils/memberStatus');
 const { MEMBER_UNPAID_SQL, MEMBER_LIVE_SQL } = require('../utils/memberListSql');
 const { createDefaultBranch } = require('../utils/branches');
-const { assignSaasPlanToGym } = require('../utils/saasSubscription');
+const { assignSaasPlanToGym, assignTrialToGym } = require('../utils/saasSubscription');
 const { gymHasPaymentForCurrentTerm, validatePaymentDate, calendarDateString, minimumRenewStartDate, queryGymPaidForCurrentTerm, queryHasPaidTermStartingOn, queryPaymentExistsOnCalendarDate } = require('../utils/saasPayments');
 const { parsePaginationQuery, paginatedResponse } = require('../utils/pagination');
 const {
@@ -35,6 +35,7 @@ const {
   GYM_IS_UNPAID_SELECT,
   GYM_DUE_SOON_SQL,
   GYM_TRIAL_ENDING_SQL,
+  GYM_ON_TRIAL_SQL,
   GYM_NEEDS_RENEWAL_SQL,
   GYM_LIVE_SQL,
   GYM_ARCHIVED_SQL,
@@ -149,8 +150,18 @@ router.get('/gyms', validateQuery(adminGymListQuerySchema), async (req, res, nex
       listParams
     );
 
-    const [allCount, unpaidCount, activeCount, suspendedCount, expiredCount, dueSoonCount, trialEndingCount, needsRenewalCount, archivedCount] =
-      await Promise.all([
+    const [
+      allCount,
+      unpaidCount,
+      activeCount,
+      suspendedCount,
+      expiredCount,
+      dueSoonCount,
+      trialEndingCount,
+      onTrialCount,
+      needsRenewalCount,
+      archivedCount,
+    ] = await Promise.all([
       db.query(`SELECT COUNT(*)::int AS count FROM (${GYM_LIST_BASE}) g`),
       db.query(`SELECT COUNT(*)::int AS count FROM (${GYM_LIST_BASE}) g WHERE (${GYM_UNPAID_SQL})`),
       db.query(`SELECT COUNT(*)::int AS count FROM (${GYM_LIST_BASE}) g WHERE LOWER(g.subscription_status) = 'active'`),
@@ -158,6 +169,7 @@ router.get('/gyms', validateQuery(adminGymListQuerySchema), async (req, res, nex
       db.query(`SELECT COUNT(*)::int AS count FROM (${GYM_LIST_BASE}) g WHERE LOWER(g.subscription_status) = 'expired'`),
       db.query(`SELECT COUNT(*)::int AS count FROM (${GYM_LIST_BASE}) g WHERE (${GYM_DUE_SOON_SQL})`),
       db.query(`SELECT COUNT(*)::int AS count FROM (${GYM_LIST_BASE}) g WHERE (${GYM_TRIAL_ENDING_SQL})`),
+      db.query(`SELECT COUNT(*)::int AS count FROM (${GYM_LIST_BASE}) g WHERE (${GYM_ON_TRIAL_SQL})`),
       db.query(`SELECT COUNT(*)::int AS count FROM (${GYM_LIST_BASE}) g WHERE (${GYM_NEEDS_RENEWAL_SQL})`),
       db.query(`SELECT COUNT(*)::int AS count FROM Gyms WHERE deleted_at IS NOT NULL`),
     ]);
@@ -173,6 +185,7 @@ router.get('/gyms', validateQuery(adminGymListQuerySchema), async (req, res, nex
           expired: expiredCount.rows[0].count,
           dueSoon: dueSoonCount.rows[0].count,
           trialEnding: trialEndingCount.rows[0].count,
+          onTrial: onTrialCount.rows[0].count,
           needsRenewal: needsRenewalCount.rows[0].count,
         },
       })
@@ -233,12 +246,16 @@ router.post('/gyms/enroll', validateBody(adminEnrollGymSchema), async (req, res,
     city,
     address,
     saas_plan_id,
+    trial_days,
     amount,
     date,
     method,
     skip_payment,
     start_date,
   } = req.body;
+
+  const trialDays = trial_days != null ? parseInt(trial_days, 10) : 0;
+  const isTrial = !Number.isNaN(trialDays) && trialDays > 0;
 
   const client = await db.pool.connect();
   try {
@@ -268,19 +285,25 @@ router.post('/gyms/enroll', validateBody(adminEnrollGymSchema), async (req, res,
       [owner_name.trim(), email ?? null, username, hashedPassword, ROLES.GYM_OWNER, gymId]
     );
 
-    const licenseStart = skip_payment
-      ? calendarDateString(start_date || todayLocalString())
-      : calendarDateString(date || start_date || todayLocalString());
+    const licenseStart =
+      isTrial || skip_payment
+        ? calendarDateString(start_date || todayLocalString())
+        : calendarDateString(date || start_date || todayLocalString());
 
-    const subscription = await assignSaasPlanToGym(
-      client,
-      gymId,
-      parseInt(saas_plan_id, 10),
-      licenseStart
-    );
+    let subscription;
+    if (isTrial) {
+      subscription = await assignTrialToGym(client, gymId, trialDays, licenseStart);
+    } else {
+      subscription = await assignSaasPlanToGym(
+        client,
+        gymId,
+        parseInt(saas_plan_id, 10),
+        licenseStart
+      );
+    }
 
     let payment = null;
-    if (!skip_payment) {
+    if (!isTrial && !skip_payment) {
       const subscriptionStart = subscription.start_date;
       const paymentDateCheck = validatePaymentDate(date || todayLocalString(), subscriptionStart);
       if (!paymentDateCheck.ok) {
@@ -322,6 +345,8 @@ router.post('/gyms/enroll', validateBody(adminEnrollGymSchema), async (req, res,
         plan_name: subscription.plan.name,
         start_date: subscription.start_date,
         end_date: subscription.end_date,
+        is_trial: isTrial || Boolean(subscription.is_trial),
+        trial_days: isTrial ? trialDays : undefined,
       },
       payment,
     });
