@@ -8,12 +8,25 @@ const GYM_LIVE_SQL = 'g.deleted_at IS NULL';
 const GYM_ARCHIVED_SQL = 'g.deleted_at IS NOT NULL';
 
 const { GYM_LICENSE_DUE_SOON_DAYS } = require('./memberStatus');
-const { GYM_TRIAL_ENDING_SQL, GYM_ON_TRIAL_SQL, GYM_IS_TRIAL_SQL } = require('./gymTrial');
+const { GYM_TRIAL_ENDING_SQL, GYM_ON_TRIAL_SQL, TRIAL_PLAN_LABEL } = require('./gymTrial');
+
+/**
+ * Free Trial via GymSubscriptions — works on bare Gyms `g` and on list subqueries.
+ * Do not use GYM_IS_TRIAL_SQL here (that needs g.saas_plan_id / g.saas_plan_name).
+ */
+const GYM_IS_TRIAL_VIA_SUB_SQL = `
+  EXISTS (
+    SELECT 1 FROM GymSubscriptions gs_trial
+    WHERE gs_trial.gym_id = g.id
+      AND gs_trial.saas_plan_id IS NULL
+      AND gs_trial.plan = '${TRIAL_PLAN_LABEL}'
+  )
+`;
 
 /** Active paid-plan gyms with no SaaS payment for the current term. Free Trial is not "unpaid". */
 const GYM_UNPAID_SQL = `
   LOWER(g.subscription_status) = 'active'
-  AND NOT (${GYM_IS_TRIAL_SQL})
+  AND NOT (${GYM_IS_TRIAL_VIA_SUB_SQL})
   AND NOT EXISTS (
     SELECT 1 FROM SaaSPayments sp
     INNER JOIN GymSubscriptions gs2 ON gs2.gym_id = g.id
@@ -28,7 +41,7 @@ const GYM_UNPAID_SQL = `
 const GYM_IS_UNPAID_SELECT = `
   (
     LOWER(g.subscription_status) = 'active'
-    AND NOT (${GYM_IS_TRIAL_SQL})
+    AND NOT (${GYM_IS_TRIAL_VIA_SUB_SQL})
     AND NOT EXISTS (
       SELECT 1 FROM SaaSPayments sp
       INNER JOIN GymSubscriptions gs2 ON gs2.gym_id = g.id
