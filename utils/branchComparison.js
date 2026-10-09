@@ -4,7 +4,12 @@
  */
 
 const db = require('../config/db');
-const { MEMBER_UNPAID_SQL, MEMBER_LIVE_SQL, MEMBER_LIVE_BARE_SQL } = require('./memberListSql');
+const {
+  MEMBER_UNPAID_SQL,
+  MEMBER_LIVE_SQL,
+  MEMBER_LIVE_BARE_SQL,
+  MEMBER_NEW_THIS_MONTH_SQL,
+} = require('./memberListSql');
 const { DUE_SOON_DAYS } = require('./memberStatus');
 const { computePercentChange } = require('./periodComparison');
 
@@ -77,9 +82,9 @@ async function fetchBranchComparisonMetrics(gymId) {
         db.query(
           `
           SELECT COUNT(*)::int AS count
-          FROM Members
-          WHERE gym_id = $1${memberFilter}${MEMBER_LIVE_BARE_SQL}
-            AND date_trunc('month', start_date) = date_trunc('month', CURRENT_DATE)
+          FROM Members m
+          WHERE m.gym_id = $1${memberAliasFilter}${MEMBER_LIVE_SQL}
+            AND (${MEMBER_NEW_THIS_MONTH_SQL})
           `,
           params
         ),

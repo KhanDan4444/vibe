@@ -92,6 +92,8 @@ CREATE TABLE IF NOT EXISTS Members (
     status VARCHAR(50) DEFAULT 'active', -- active, expired, due soon
     photo_url VARCHAR(512),
     deleted_at TIMESTAMPTZ,
+    /** Immutable registration time — renew must not change this (new-members metrics). */
+    created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
     pass_version INT NOT NULL DEFAULT 1,
     pass_public_code VARCHAR(16),
     telegram_chat_id BIGINT,
@@ -201,6 +203,43 @@ ALTER TABLE Users ADD COLUMN IF NOT EXISTS branch_id INT REFERENCES Branches(id)
 ALTER TABLE Members ADD COLUMN IF NOT EXISTS branch_id INT REFERENCES Branches(id) ON DELETE RESTRICT;
 ALTER TABLE Members ADD COLUMN IF NOT EXISTS photo_url VARCHAR(512);
 ALTER TABLE Members ADD COLUMN IF NOT EXISTS trainer_id INT REFERENCES Trainers(id) ON DELETE SET NULL;
+ALTER TABLE Members ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ;
+
+-- Backfill registration time (never use renewed start_date when renew payments exist).
+UPDATE Members m
+SET created_at = (e.enrolled_on + TIME '12:00') AT TIME ZONE 'Africa/Addis_Ababa'
+FROM (
+  SELECT member_id, MIN(date) AS enrolled_on
+  FROM Payments
+  WHERE source = 'enroll'
+  GROUP BY member_id
+) e
+WHERE m.id = e.member_id AND m.created_at IS NULL;
+
+UPDATE Members m
+SET created_at = (f.first_on + TIME '12:00') AT TIME ZONE 'Africa/Addis_Ababa'
+FROM (
+  SELECT member_id, MIN(date) AS first_on
+  FROM Payments
+  WHERE COALESCE(source, 'collect') <> 'trainer'
+  GROUP BY member_id
+) f
+WHERE m.id = f.member_id AND m.created_at IS NULL;
+
+UPDATE Members m
+SET created_at = (m.start_date + TIME '12:00') AT TIME ZONE 'Africa/Addis_Ababa'
+WHERE m.created_at IS NULL
+  AND NOT EXISTS (
+    SELECT 1 FROM Payments p
+    WHERE p.member_id = m.id AND p.source IN ('renew', 'change_plan')
+  );
+
+UPDATE Members
+SET created_at = TIMESTAMP WITH TIME ZONE '2000-01-01 00:00:00+00'
+WHERE created_at IS NULL;
+
+ALTER TABLE Members ALTER COLUMN created_at SET DEFAULT CURRENT_TIMESTAMP;
+ALTER TABLE Members ALTER COLUMN created_at SET NOT NULL;
 ALTER TABLE AuditLogs ADD COLUMN IF NOT EXISTS branch_id INT REFERENCES Branches(id) ON DELETE SET NULL;
 
 UPDATE Users SET is_active = true WHERE is_active IS NULL;

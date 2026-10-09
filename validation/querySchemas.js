@@ -20,7 +20,7 @@ const paymentSortSchema = z.enum(['date_desc', 'date_asc', 'name_asc', 'name_des
 const memberFilterSchema = z.enum(['unpaid', 'due_soon', 'expired', 'new', 'inactive_week']).optional();
 
 const gymFilterSchema = z
-  .enum(['unpaid', 'due_soon', 'trial_ending', 'on_trial', 'expired', 'needs_renewal'])
+  .enum(['unpaid', 'due_soon', 'trial_ending', 'on_trial', 'expired', 'new', 'needs_renewal'])
   .optional();
 
 const subscriptionStatusQuerySchema = z

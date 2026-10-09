@@ -55,6 +55,12 @@ const GYM_NEEDS_RENEWAL_SQL = `
   )
 `;
 
+/** Newly registered this calendar month. Alias `g` required. */
+const GYM_NEW_THIS_MONTH_SQL = `
+  g.created_at IS NOT NULL
+  AND date_trunc('month', g.created_at) = date_trunc('month', CURRENT_DATE)
+`;
+
 /**
  * @param {object} query - req.query (status, filter, search)
  * @param {number} [startParamIndex=1] - first $N placeholder index
@@ -81,6 +87,8 @@ function buildGymListFilters(query, startParamIndex = 1) {
     conditions.push(`(${GYM_ON_TRIAL_SQL})`);
   } else if (filter === 'expired') {
     conditions.push(`(${GYM_EXPIRED_OR_SUSPENDED_SQL})`);
+  } else if (filter === 'new') {
+    conditions.push(`(${GYM_NEW_THIS_MONTH_SQL})`);
   } else if (filter === 'needs_renewal') {
     conditions.push(`(${GYM_NEEDS_RENEWAL_SQL})`);
   } else if (status && status !== 'All') {
@@ -114,6 +122,7 @@ module.exports = {
   GYM_DUE_SOON_SQL,
   GYM_EXPIRED_OR_SUSPENDED_SQL,
   GYM_NEEDS_RENEWAL_SQL,
+  GYM_NEW_THIS_MONTH_SQL,
   GYM_TRIAL_ENDING_SQL,
   GYM_ON_TRIAL_SQL,
   buildGymListFilters,

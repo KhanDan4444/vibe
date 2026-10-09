@@ -51,6 +51,39 @@ const MEMBER_NO_VISIT_WEEK_SQL = `
   )
 `;
 
+/**
+ * Calendar date the member joined the gym (registration), not the current term start.
+ * Renew updates start_date — never treat that as "new member".
+ */
+const MEMBER_REGISTERED_ON_SQL = `
+  COALESCE(
+    m.created_at::date,
+    (
+      SELECT MIN(p.date)
+      FROM Payments p
+      WHERE p.member_id = m.id AND p.source = 'enroll'
+    ),
+    CASE
+      WHEN NOT EXISTS (
+        SELECT 1 FROM Payments p
+        WHERE p.member_id = m.id AND p.source IN ('renew', 'change_plan')
+      ) THEN m.start_date
+      ELSE NULL
+    END
+  )
+`;
+
+/** Newly registered this calendar month (not renewals). Alias `m` required. */
+const MEMBER_NEW_THIS_MONTH_SQL = `
+  date_trunc('month', ${MEMBER_REGISTERED_ON_SQL}) = date_trunc('month', CURRENT_DATE)
+`;
+
+/** Newly registered last calendar month. Alias `m` required. */
+const MEMBER_NEW_LAST_MONTH_SQL = `
+  date_trunc('month', ${MEMBER_REGISTERED_ON_SQL})
+    = date_trunc('month', CURRENT_DATE - INTERVAL '1 month')
+`;
+
 const MEMBER_LIST_FROM = `
   FROM Members m
   LEFT JOIN Plans p ON p.id = m.plan_id
@@ -114,8 +147,8 @@ function buildMemberListFilters(query, startParamIndex = 2, options = {}) {
   } else if (filter === 'expired') {
     conditions.push(`(${statusWhereSql(MEMBER_STATUS.EXPIRED)})`);
   } else if (filter === 'new') {
-    // Same definition as dashboard newMembersThisMonth (current term started this month).
-    conditions.push(`date_trunc('month', m.start_date) = date_trunc('month', CURRENT_DATE)`);
+    // Same definition as dashboard newMembersThisMonth (registered this month — not renewals).
+    conditions.push(`(${MEMBER_NEW_THIS_MONTH_SQL})`);
   } else if (filter === 'inactive_week') {
     conditions.push(`(${MEMBER_NO_VISIT_WEEK_SQL})`);
   } else if (status) {
@@ -187,6 +220,9 @@ module.exports = {
   MEMBER_LIVE_SQL,
   MEMBER_LIVE_BARE_SQL,
   MEMBER_NO_VISIT_WEEK_SQL,
+  MEMBER_REGISTERED_ON_SQL,
+  MEMBER_NEW_THIS_MONTH_SQL,
+  MEMBER_NEW_LAST_MONTH_SQL,
   MEMBER_LIST_FROM,
   MEMBER_LIST_SELECT,
   buildMemberListFilters,

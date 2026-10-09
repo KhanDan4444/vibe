@@ -37,6 +37,7 @@ const {
   GYM_TRIAL_ENDING_SQL,
   GYM_ON_TRIAL_SQL,
   GYM_NEEDS_RENEWAL_SQL,
+  GYM_NEW_THIS_MONTH_SQL,
   GYM_LIVE_SQL,
   GYM_ARCHIVED_SQL,
   buildGymListFilters,
@@ -159,6 +160,7 @@ router.get('/gyms', validateQuery(adminGymListQuerySchema), async (req, res, nex
       dueSoonCount,
       trialEndingCount,
       onTrialCount,
+      newCount,
       needsRenewalCount,
       archivedCount,
     ] = await Promise.all([
@@ -170,6 +172,7 @@ router.get('/gyms', validateQuery(adminGymListQuerySchema), async (req, res, nex
       db.query(`SELECT COUNT(*)::int AS count FROM (${GYM_LIST_BASE}) g WHERE (${GYM_DUE_SOON_SQL})`),
       db.query(`SELECT COUNT(*)::int AS count FROM (${GYM_LIST_BASE}) g WHERE (${GYM_TRIAL_ENDING_SQL})`),
       db.query(`SELECT COUNT(*)::int AS count FROM (${GYM_LIST_BASE}) g WHERE (${GYM_ON_TRIAL_SQL})`),
+      db.query(`SELECT COUNT(*)::int AS count FROM (${GYM_LIST_BASE}) g WHERE (${GYM_NEW_THIS_MONTH_SQL})`),
       db.query(`SELECT COUNT(*)::int AS count FROM (${GYM_LIST_BASE}) g WHERE (${GYM_NEEDS_RENEWAL_SQL})`),
       db.query(`SELECT COUNT(*)::int AS count FROM Gyms WHERE deleted_at IS NOT NULL`),
     ]);
@@ -186,6 +189,7 @@ router.get('/gyms', validateQuery(adminGymListQuerySchema), async (req, res, nex
           dueSoon: dueSoonCount.rows[0].count,
           trialEnding: trialEndingCount.rows[0].count,
           onTrial: onTrialCount.rows[0].count,
+          new: newCount.rows[0].count,
           needsRenewal: needsRenewalCount.rows[0].count,
         },
       })

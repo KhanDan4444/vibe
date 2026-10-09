@@ -10,7 +10,14 @@ const auth = require('../middleware/auth');
 const checkSubscription = require('../middleware/subscriptionCheck');
 const requireGymAccess = require('../middleware/requireGymAccess');
 const requireGymOwner = require('../middleware/requireGymOwner');
-const { MEMBER_UNPAID_SQL, MEMBER_LIVE_SQL, MEMBER_LIVE_BARE_SQL, MEMBER_NO_VISIT_WEEK_SQL } = require('../utils/memberListSql');
+const {
+  MEMBER_UNPAID_SQL,
+  MEMBER_LIVE_SQL,
+  MEMBER_LIVE_BARE_SQL,
+  MEMBER_NO_VISIT_WEEK_SQL,
+  MEMBER_NEW_THIS_MONTH_SQL,
+  MEMBER_NEW_LAST_MONTH_SQL,
+} = require('../utils/memberListSql');
 const { DUE_SOON_DAYS, ATTENTION_DUE_SOON_DAYS, canRenewOnDate } = require('../utils/memberStatus');
 const { computePercentChange, computeCountDelta } = require('../utils/periodComparison');
 const { resolveBranchScope, gymBranchParams } = require('../utils/branchScope');
@@ -111,18 +118,18 @@ router.get('/', async (req, res, next) => {
       db.query(
         `
         SELECT COUNT(*)::int AS count
-        FROM Members
-        WHERE gym_id = $1${mb}${MEMBER_LIVE_BARE_SQL}
-          AND date_trunc('month', start_date) = date_trunc('month', CURRENT_DATE)
+        FROM Members m
+        WHERE m.gym_id = $1${ma}${MEMBER_LIVE_SQL}
+          AND (${MEMBER_NEW_THIS_MONTH_SQL})
         `,
         qp
       ),
       db.query(
         `
         SELECT COUNT(*)::int AS count
-        FROM Members
-        WHERE gym_id = $1${mb}${MEMBER_LIVE_BARE_SQL}
-          AND date_trunc('month', start_date) = date_trunc('month', CURRENT_DATE - INTERVAL '1 month')
+        FROM Members m
+        WHERE m.gym_id = $1${ma}${MEMBER_LIVE_SQL}
+          AND (${MEMBER_NEW_LAST_MONTH_SQL})
         `,
         qp
       ),
@@ -136,9 +143,12 @@ router.get('/', async (req, res, next) => {
         SELECT
           m.id,
           m.name,
+          m.phone,
           m.plan_id,
           m.end_date,
           m.photo_url,
+          m.branch_id,
+          b.name AS branch_name,
           CASE
             WHEN m.end_date < CURRENT_DATE THEN 'expired'
             WHEN m.end_date <= CURRENT_DATE + INTERVAL '${DUE_SOON_DAYS} days' THEN 'due soon'
@@ -147,6 +157,7 @@ router.get('/', async (req, res, next) => {
           p.name AS plan_name
         FROM Members m
         LEFT JOIN Plans p ON p.id = m.plan_id
+        LEFT JOIN Branches b ON b.id = m.branch_id
         WHERE m.gym_id = $1${ma}${MEMBER_LIVE_SQL}
           AND m.end_date <= CURRENT_DATE + INTERVAL '${ATTENTION_DUE_SOON_DAYS} days'
           AND NOT (${MEMBER_UNPAID_SQL})
