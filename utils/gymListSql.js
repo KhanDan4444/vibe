@@ -7,8 +7,13 @@
 const GYM_LIVE_SQL = 'g.deleted_at IS NULL';
 const GYM_ARCHIVED_SQL = 'g.deleted_at IS NOT NULL';
 
+const { GYM_LICENSE_DUE_SOON_DAYS } = require('./memberStatus');
+const { GYM_TRIAL_ENDING_SQL, GYM_ON_TRIAL_SQL, GYM_IS_TRIAL_SQL } = require('./gymTrial');
+
+/** Active paid-plan gyms with no SaaS payment for the current term. Free Trial is not "unpaid". */
 const GYM_UNPAID_SQL = `
   LOWER(g.subscription_status) = 'active'
+  AND NOT (${GYM_IS_TRIAL_SQL})
   AND NOT EXISTS (
     SELECT 1 FROM SaaSPayments sp
     INNER JOIN GymSubscriptions gs2 ON gs2.gym_id = g.id
@@ -23,6 +28,7 @@ const GYM_UNPAID_SQL = `
 const GYM_IS_UNPAID_SELECT = `
   (
     LOWER(g.subscription_status) = 'active'
+    AND NOT (${GYM_IS_TRIAL_SQL})
     AND NOT EXISTS (
       SELECT 1 FROM SaaSPayments sp
       INNER JOIN GymSubscriptions gs2 ON gs2.gym_id = g.id
@@ -34,9 +40,6 @@ const GYM_IS_UNPAID_SELECT = `
     )
   ) AS is_unpaid
 `;
-
-const { GYM_LICENSE_DUE_SOON_DAYS } = require('./memberStatus');
-const { GYM_TRIAL_ENDING_SQL, GYM_ON_TRIAL_SQL } = require('./gymTrial');
 
 const GYM_DUE_SOON_SQL = `
   LOWER(g.subscription_status) = 'active'
