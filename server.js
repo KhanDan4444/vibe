@@ -3,20 +3,38 @@
  * @description Gym SaaS Express REST API Entry Point.
  */
 
-require('dotenv').config();
+// Sentry first — loads dotenv and inits when SENTRY_DSN is set.
+const Sentry = require('./instrument');
 
 if (!process.env.JWT_SECRET) {
   console.error('FATAL: JWT_SECRET is not set. Refusing to start.');
   process.exit(1);
 }
 
+if (process.env.SENTRY_DSN) {
+  console.log(
+    `[sentry] Enabled (env=${process.env.SENTRY_ENVIRONMENT || process.env.NODE_ENV || 'development'})`
+  );
+} else {
+  console.log('[sentry] Disabled (set SENTRY_DSN to enable)');
+}
+
 process.on('unhandledRejection', (reason) => {
   console.error('[unhandledRejection]', reason);
+  if (process.env.SENTRY_DSN) {
+    Sentry.captureException(reason instanceof Error ? reason : new Error(String(reason)));
+  }
 });
 
 process.on('uncaughtException', (error) => {
   console.error('[uncaughtException]', error);
-  process.exit(1);
+  const exit = () => process.exit(1);
+  if (process.env.SENTRY_DSN) {
+    Sentry.captureException(error);
+    void Sentry.close(2000).then(exit, exit);
+    return;
+  }
+  exit();
 });
 
 const express = require('express');

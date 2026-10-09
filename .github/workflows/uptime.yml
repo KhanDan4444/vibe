@@ -1,0 +1,39 @@
+# Pings production /api/health every 5 minutes.
+# Failed runs show under Actions; enable email on workflow failure in GitHub settings.
+name: API uptime
+
+on:
+  schedule:
+    # GitHub cron can drift a few minutes; every 5 min is fine for desk ops.
+    - cron: '*/5 * * * *'
+  workflow_dispatch:
+
+jobs:
+  health:
+    name: GET /api/health
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Check API health
+        env:
+          # Override via repo Variable UPTIME_API_BASE if the Railway URL changes.
+          UPTIME_API_BASE: ${{ vars.UPTIME_API_BASE }}
+        run: |
+          set -euo pipefail
+          BASE="${UPTIME_API_BASE:-https://vibe-api-production-5ab1.up.railway.app}"
+          BASE="${BASE%/}"
+          URL="${BASE}/api/health"
+          echo "Checking ${URL}"
+          CODE=$(curl -sS -o /tmp/health.json -w '%{http_code}' --max-time 20 "$URL" || true)
+          echo "HTTP ${CODE}"
+          cat /tmp/health.json 2>/dev/null || true
+          echo
+          if [ "$CODE" != "200" ]; then
+            echo "::error::API health check failed (HTTP ${CODE})"
+            exit 1
+          fi
+          if ! grep -q '"ok":true' /tmp/health.json && ! grep -q '"ok": true' /tmp/health.json; then
+            echo "::error::API health body missing ok:true"
+            exit 1
+          fi
+          echo "OK"
