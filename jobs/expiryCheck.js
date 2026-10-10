@@ -1,6 +1,6 @@
 /**
  * @file expiryCheck.js
- * @description Daily membership and gym SaaS license expiry checks with SMS + email alerts.
+ * @description Daily membership and gym SaaS license expiry checks (Telegram + email).
  */
 
 const db = require('../config/db');
@@ -132,7 +132,7 @@ async function runGymSaasExpiryCheck() {
       AND gs.end_date < CURRENT_DATE
       AND LOWER(g.subscription_status) = $2
       AND g.deleted_at IS NULL
-    RETURNING g.id, g.name, g.phone, gs.end_date, gs.plan, gs.saas_plan_id;
+    RETURNING g.id, g.name, g.phone, g.telegram_chat_id, gs.end_date, gs.plan, gs.saas_plan_id;
   `;
   const expiredGyms = await db.query(expireQuery, [GYM_STATUS.EXPIRED, GYM_STATUS.ACTIVE]);
 
@@ -158,7 +158,7 @@ async function runGymSaasExpiryCheck() {
   }
 
   const dueIn3DaysQuery = `
-    SELECT g.id, g.name, g.phone, gs.end_date, gs.plan, gs.saas_plan_id
+    SELECT g.id, g.name, g.phone, g.telegram_chat_id, gs.end_date, gs.plan, gs.saas_plan_id
     FROM Gyms g
     JOIN GymSubscriptions gs ON gs.gym_id = g.id
     WHERE LOWER(g.subscription_status) = $1
@@ -174,7 +174,7 @@ async function runGymSaasExpiryCheck() {
   }
 
   const expiringTodayQuery = `
-    SELECT g.id, g.name, g.phone, gs.end_date, gs.plan, gs.saas_plan_id
+    SELECT g.id, g.name, g.phone, g.telegram_chat_id, gs.end_date, gs.plan, gs.saas_plan_id
     FROM Gyms g
     JOIN GymSubscriptions gs ON gs.gym_id = g.id
     WHERE LOWER(g.subscription_status) = $1

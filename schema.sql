@@ -13,11 +13,17 @@ CREATE TABLE IF NOT EXISTS Gyms (
     city VARCHAR(100),
     address TEXT,
     subscription_status VARCHAR(50) DEFAULT 'active', -- active, expired, suspended
+    telegram_chat_id BIGINT,
+    telegram_linked_at TIMESTAMPTZ,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     deleted_at TIMESTAMPTZ,
     -- Forces system-level tenant status values to remain uniform
     CONSTRAINT check_subscription_status_lowercase CHECK (subscription_status = LOWER(subscription_status))
 );
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_gyms_telegram_chat_id
+  ON Gyms (telegram_chat_id)
+  WHERE telegram_chat_id IS NOT NULL;
 
 CREATE INDEX IF NOT EXISTS idx_gyms_live
   ON Gyms (id)
@@ -308,15 +314,24 @@ CREATE TABLE IF NOT EXISTS SmsLog (
 
 CREATE TABLE IF NOT EXISTS TelegramLinkTokens (
     id SERIAL PRIMARY KEY,
-    member_id INT NOT NULL REFERENCES Members(id) ON DELETE CASCADE,
+    member_id INT REFERENCES Members(id) ON DELETE CASCADE,
+    gym_id INT REFERENCES Gyms(id) ON DELETE CASCADE,
     token VARCHAR(16) NOT NULL UNIQUE,
     expires_at TIMESTAMPTZ NOT NULL,
     used_at TIMESTAMPTZ,
-    created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+    created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT telegram_link_tokens_target_check CHECK (
+      (member_id IS NOT NULL AND gym_id IS NULL)
+      OR (member_id IS NULL AND gym_id IS NOT NULL)
+    )
 );
 
 CREATE INDEX IF NOT EXISTS idx_telegram_link_tokens_member
     ON TelegramLinkTokens (member_id, created_at DESC);
+
+CREATE INDEX IF NOT EXISTS idx_telegram_link_tokens_gym
+    ON TelegramLinkTokens (gym_id, created_at DESC)
+    WHERE gym_id IS NOT NULL;
 
 CREATE INDEX IF NOT EXISTS idx_telegram_link_tokens_expires
     ON TelegramLinkTokens (expires_at)

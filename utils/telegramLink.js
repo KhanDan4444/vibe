@@ -1,6 +1,6 @@
 /**
  * @file telegramLink.js
- * @description Member ↔ Telegram chat linking via one-time /start tokens.
+ * @description Member/gym ↔ Telegram chat linking via one-time /start tokens.
  */
 
 const crypto = require('crypto');
@@ -26,18 +26,23 @@ function buildDeepLink(token) {
   return `https://t.me/${username}?start=${encodeURIComponent(token)}`;
 }
 
-/**
- * Invalidate unused tokens for a member, then create a fresh link token.
- * @param {number} memberId
- */
-async function createLinkToken(memberId) {
+async function insertLinkToken({ memberId = null, gymId = null }) {
+  if ((memberId == null) === (gymId == null)) {
+    const err = new Error('Link token requires exactly one of memberId or gymId.');
+    err.statusCode = 500;
+    throw err;
+  }
+
+  const targetCol = memberId != null ? 'member_id' : 'gym_id';
+  const targetId = memberId != null ? memberId : gymId;
+
   await db.query(
     `
     UPDATE TelegramLinkTokens
     SET used_at = CURRENT_TIMESTAMP
-    WHERE member_id = $1 AND used_at IS NULL
+    WHERE ${targetCol} = $1 AND used_at IS NULL
     `,
-    [memberId]
+    [targetId]
   );
 
   const expiresAt = new Date(Date.now() + TOKEN_TTL_MS);
@@ -46,10 +51,10 @@ async function createLinkToken(memberId) {
     try {
       await db.query(
         `
-        INSERT INTO TelegramLinkTokens (member_id, token, expires_at)
-        VALUES ($1, $2, $3)
+        INSERT INTO TelegramLinkTokens (member_id, gym_id, token, expires_at)
+        VALUES ($1, $2, $3, $4)
         `,
-        [memberId, token, expiresAt.toISOString()]
+        [memberId, gymId, token, expiresAt.toISOString()]
       );
       return {
         token,
@@ -68,7 +73,23 @@ async function createLinkToken(memberId) {
 }
 
 /**
- * Link a Telegram chat to a member using a /start token.
+ * Invalidate unused tokens for a member, then create a fresh link token.
+ * @param {number} memberId
+ */
+async function createLinkToken(memberId) {
+  return insertLinkToken({ memberId });
+}
+
+/**
+ * Invalidate unused tokens for a gym, then create a fresh owner link token.
+ * @param {number} gymId
+ */
+async function createGymLinkToken(gymId) {
+  return insertLinkToken({ gymId });
+}
+
+/**
+ * Link a Telegram chat using a /start token (member or gym).
  * @param {string} token
  * @param {number|string} chatId
  */
@@ -85,14 +106,16 @@ async function consumeLinkToken(token, chatId) {
 
     const tokenRow = await client.query(
       `
-      SELECT t.id, t.member_id, t.expires_at, t.used_at,
+      SELECT t.id, t.member_id, t.gym_id, t.expires_at, t.used_at,
              m.name AS member_name, m.end_date,
-             g.name AS gym_name,
-             p.name AS plan_name, p.duration AS plan_duration
+             g_member.name AS member_gym_name,
+             p.name AS plan_name, p.duration AS plan_duration,
+             g_direct.name AS gym_name
       FROM TelegramLinkTokens t
-      INNER JOIN Members m ON m.id = t.member_id
-      INNER JOIN Gyms g ON g.id = m.gym_id
+      LEFT JOIN Members m ON m.id = t.member_id
+      LEFT JOIN Gyms g_member ON g_member.id = m.gym_id
       LEFT JOIN Plans p ON p.id = m.plan_id
+      LEFT JOIN Gyms g_direct ON g_direct.id = t.gym_id
       WHERE t.token = $1
       FOR UPDATE OF t
       `,
@@ -113,29 +136,59 @@ async function consumeLinkToken(token, chatId) {
       return { ok: false, error: 'token_expired' };
     }
 
-    const existing = await client.query(
+    const memberConflict = await client.query(
       `
       SELECT id, name FROM Members
-      WHERE telegram_chat_id = $1 AND id <> $2 AND deleted_at IS NULL
+      WHERE telegram_chat_id = $1 AND deleted_at IS NULL
+        AND ($2::int IS NULL OR id <> $2)
       LIMIT 1
       `,
       [normalizedChatId, row.member_id]
     );
-    if (existing.rows[0]) {
+    if (memberConflict.rows[0]) {
       await client.query('ROLLBACK');
       return { ok: false, error: 'chat_already_linked' };
     }
 
-    await client.query(
+    const gymConflict = await client.query(
       `
-      UPDATE Members
-      SET telegram_chat_id = $1,
-          telegram_linked_at = CURRENT_TIMESTAMP,
-          preferred_channel = 'telegram'
-      WHERE id = $2
+      SELECT id, name FROM Gyms
+      WHERE telegram_chat_id = $1 AND deleted_at IS NULL
+        AND ($2::int IS NULL OR id <> $2)
+      LIMIT 1
       `,
-      [normalizedChatId, row.member_id]
+      [normalizedChatId, row.gym_id]
     );
+    if (gymConflict.rows[0]) {
+      await client.query('ROLLBACK');
+      return { ok: false, error: 'chat_already_linked' };
+    }
+
+    if (row.member_id != null) {
+      await client.query(
+        `
+        UPDATE Members
+        SET telegram_chat_id = $1,
+            telegram_linked_at = CURRENT_TIMESTAMP,
+            preferred_channel = 'telegram'
+        WHERE id = $2
+        `,
+        [normalizedChatId, row.member_id]
+      );
+    } else if (row.gym_id != null) {
+      await client.query(
+        `
+        UPDATE Gyms
+        SET telegram_chat_id = $1,
+            telegram_linked_at = CURRENT_TIMESTAMP
+        WHERE id = $2 AND deleted_at IS NULL
+        `,
+        [normalizedChatId, row.gym_id]
+      );
+    } else {
+      await client.query('ROLLBACK');
+      return { ok: false, error: 'invalid_token' };
+    }
 
     await client.query(
       `
@@ -148,14 +201,24 @@ async function consumeLinkToken(token, chatId) {
 
     await client.query('COMMIT');
 
+    if (row.member_id != null) {
+      return {
+        ok: true,
+        kind: 'member',
+        memberId: row.member_id,
+        memberName: row.member_name,
+        gymName: row.member_gym_name,
+        planName: row.plan_name || null,
+        planDuration: row.plan_duration != null ? Number(row.plan_duration) : null,
+        endDate: row.end_date || null,
+      };
+    }
+
     return {
       ok: true,
-      memberId: row.member_id,
-      memberName: row.member_name,
+      kind: 'gym',
+      gymId: row.gym_id,
       gymName: row.gym_name,
-      planName: row.plan_name || null,
-      planDuration: row.plan_duration != null ? Number(row.plan_duration) : null,
-      endDate: row.end_date || null,
     };
   } catch (err) {
     await client.query('ROLLBACK');
@@ -166,7 +229,8 @@ async function consumeLinkToken(token, chatId) {
 }
 
 /**
- * Unlink Telegram for the member owning this chat id.
+ * Unlink Telegram for the member or gym owning this chat id.
+ * Prefer member unlink when both somehow exist (should not).
  * @param {number|string} chatId
  */
 async function unlinkTelegramChat(chatId) {
@@ -175,7 +239,7 @@ async function unlinkTelegramChat(chatId) {
     return { ok: false, error: 'invalid_chat_id' };
   }
 
-  const result = await db.query(
+  const memberResult = await db.query(
     `
     UPDATE Members
     SET telegram_chat_id = NULL,
@@ -187,13 +251,27 @@ async function unlinkTelegramChat(chatId) {
     [normalizedChatId]
   );
 
-  if (!result.rows[0]) {
-    return { ok: false, error: 'not_linked' };
+  if (memberResult.rows[0]) {
+    await clearStationDevicesForMember(memberResult.rows[0].id);
+    return { ok: true, kind: 'member', member: memberResult.rows[0] };
   }
 
-  await clearStationDevicesForMember(result.rows[0].id);
+  const gymResult = await db.query(
+    `
+    UPDATE Gyms
+    SET telegram_chat_id = NULL,
+        telegram_linked_at = NULL
+    WHERE telegram_chat_id = $1 AND deleted_at IS NULL
+    RETURNING id, name
+    `,
+    [normalizedChatId]
+  );
 
-  return { ok: true, member: result.rows[0] };
+  if (gymResult.rows[0]) {
+    return { ok: true, kind: 'gym', gym: gymResult.rows[0] };
+  }
+
+  return { ok: false, error: 'not_linked' };
 }
 
 /**
@@ -231,12 +309,46 @@ async function unlinkTelegramMember(memberId) {
   return { ok: true, member: result.rows[0] };
 }
 
+/**
+ * Owner-initiated unlink for their gym.
+ * @param {number} gymId
+ */
+async function unlinkTelegramGym(gymId) {
+  const id = Number(gymId);
+  if (!Number.isFinite(id)) {
+    return { ok: false, error: 'invalid_gym_id' };
+  }
+
+  const result = await db.query(
+    `
+    UPDATE Gyms
+    SET telegram_chat_id = NULL,
+        telegram_linked_at = NULL
+    WHERE id = $1 AND deleted_at IS NULL AND telegram_chat_id IS NOT NULL
+    RETURNING id, name
+    `,
+    [id]
+  );
+
+  if (!result.rows[0]) {
+    const exists = await db.query(`SELECT id FROM Gyms WHERE id = $1 AND deleted_at IS NULL`, [id]);
+    if (!exists.rows[0]) {
+      return { ok: false, error: 'gym_not_found' };
+    }
+    return { ok: false, error: 'not_linked' };
+  }
+
+  return { ok: true, gym: result.rows[0] };
+}
+
 module.exports = {
   TOKEN_TTL_MS,
   isTelegramConfigured,
   buildDeepLink,
   createLinkToken,
+  createGymLinkToken,
   consumeLinkToken,
   unlinkTelegramChat,
   unlinkTelegramMember,
+  unlinkTelegramGym,
 };

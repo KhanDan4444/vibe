@@ -14,6 +14,11 @@ const { ROLES } = require('../utils/roles');
 const { validateBody } = require('../middleware/validate');
 const { updateOwnerProfileSchema } = require('../validation/schemas');
 const { normalizeEthiopianPhone } = require('../utils/phone');
+const {
+  createGymLinkToken,
+  unlinkTelegramGym,
+  isTelegramConfigured,
+} = require('../utils/telegramLink');
 
 router.use(auth, requireGymOwner);
 
@@ -32,6 +37,8 @@ router.get('/', async (req, res, next) => {
         g.name AS gym_name,
         g.owner_name,
         g.phone,
+        g.telegram_chat_id,
+        g.telegram_linked_at,
         u.id AS user_id,
         u.name AS user_name,
         u.email,
@@ -54,6 +61,9 @@ router.get('/', async (req, res, next) => {
         name: row.gym_name,
         owner_name: row.owner_name,
         phone: row.phone,
+        telegram_chat_id: row.telegram_chat_id || null,
+        telegram_linked_at: row.telegram_linked_at || null,
+        telegram_linked: Boolean(row.telegram_chat_id),
       },
       user: {
         id: row.user_id,
@@ -61,7 +71,60 @@ router.get('/', async (req, res, next) => {
         email: row.email,
         username: row.username,
       },
+      telegram_configured: isTelegramConfigured(),
     });
+  } catch (error) {
+    next(error);
+  }
+});
+
+/**
+ * POST /api/gym/profile/telegram/link-token
+ * One-time deep link so the gym owner can receive license alerts on Telegram.
+ */
+router.post('/telegram/link-token', async (req, res, next) => {
+  try {
+    if (!isTelegramConfigured()) {
+      return res.status(503).json({ error: 'Telegram is not configured on this server.' });
+    }
+    const gymId = req.user.gym_id;
+    const gym = await db.query(
+      `SELECT id, telegram_chat_id FROM Gyms WHERE id = $1 AND deleted_at IS NULL`,
+      [gymId]
+    );
+    if (!gym.rows[0]) {
+      return res.status(404).json({ error: 'Gym not found.' });
+    }
+    if (gym.rows[0].telegram_chat_id) {
+      return res.json({
+        already_linked: true,
+        telegram_linked: true,
+      });
+    }
+    const token = await createGymLinkToken(gymId);
+    res.status(201).json({
+      already_linked: false,
+      ...token,
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+/**
+ * DELETE /api/gym/profile/telegram
+ * Unlink gym Telegram for license alerts.
+ */
+router.delete('/telegram', async (req, res, next) => {
+  try {
+    const result = await unlinkTelegramGym(req.user.gym_id);
+    if (!result.ok) {
+      if (result.error === 'not_linked') {
+        return res.status(400).json({ error: 'Telegram is not linked for this gym.' });
+      }
+      return res.status(404).json({ error: 'Gym not found.' });
+    }
+    res.json({ ok: true, gym_id: result.gym.id });
   } catch (error) {
     next(error);
   }

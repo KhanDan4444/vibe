@@ -31,7 +31,7 @@ function getTransporter() {
  * @param {{ to: string, subject: string, text: string, html?: string }} options
  */
 async function sendEmail({ to, subject, text, html }) {
-  const from = process.env.SMTP_FROM || process.env.SMTP_USER || 'noreply@vibesaas.local';
+  const from = process.env.SMTP_FROM || process.env.SMTP_USER || 'noreply@niku.local';
 
   const safeText = text.replace(/token=[a-f0-9]+/gi, 'token=[REDACTED]');
 

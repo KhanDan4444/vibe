@@ -350,10 +350,6 @@ const updateSaasPlanSchema = z.object({
   is_active: z.boolean().optional(),
 });
 
-const forgotPasswordSchema = z.object({
-  email,
-});
-
 const requestForgotOtpSchema = z.object({
   username: z
     .string()
@@ -389,11 +385,6 @@ const gymSignupCompleteSchema = z.object({
   phone: ethiopianPhone,
   city: trimmed(100),
   address: optionalTrimmed(500),
-});
-
-const resetPasswordSchema = z.object({
-  token: z.string().trim().min(32).max(128),
-  password,
 });
 
 const changePasswordSchema = z
@@ -482,13 +473,11 @@ module.exports = {
   adminUpdatePaymentSchema,
   createSaasPlanSchema,
   updateSaasPlanSchema,
-  forgotPasswordSchema,
   requestForgotOtpSchema,
   resetForgotOtpSchema,
   gymSignupRequestOtpSchema,
   gymSignupVerifyOtpSchema,
   gymSignupCompleteSchema,
-  resetPasswordSchema,
   changePasswordSchema,
   adminSetPasswordSchema,
   createStaffSchema,

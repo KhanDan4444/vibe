@@ -111,7 +111,12 @@ router.post('/webhook', async (req, res, next) => {
       }
 
       const result = await consumeLinkToken(token, chatId);
-      if (result.ok) {
+      if (result.ok && result.kind === 'gym') {
+        await sendMessage(
+          chatId,
+          `Linked to ${result.gymName || 'your gym'}. You will get platform license and trial reminders here.`
+        );
+      } else if (result.ok) {
         const passUrl = await buildPublicPassUrl({ memberId: result.memberId });
         await sendTelegramLinkWelcome(
           {
@@ -150,13 +155,18 @@ router.post('/webhook', async (req, res, next) => {
 
     if (parsed?.command === 'stop') {
       const result = await unlinkTelegramChat(chatId);
-      if (result.ok) {
+      if (result.ok && result.kind === 'gym') {
+        await sendMessage(
+          chatId,
+          `Unlinked from ${result.gym.name}. Link again from Account in your gym portal to receive license reminders.`
+        );
+      } else if (result.ok) {
         await sendMessage(
           chatId,
           `Unlinked from ${result.member.name}. Link again from your gym to receive messages on Telegram.`
         );
       } else {
-        await sendMessage(chatId, 'This Telegram account is not linked to a membership.');
+        await sendMessage(chatId, 'This Telegram account is not linked.');
       }
       return res.json({ ok: true });
     }

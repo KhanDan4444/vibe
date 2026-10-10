@@ -1,6 +1,6 @@
 /**
  * @file notificationSms.js
- * @description Transactional SMS reminders (members + gym SaaS license) via Afro Message.
+ * @description Outbound member/gym notices (Telegram) and OTP SMS via Afro Message.
  */
 
 const db = require('../config/db');
@@ -9,7 +9,6 @@ const { sendSms, isSmsConfigured } = require('./smsProvider');
 const { sendMessage: sendTelegramMessage, isTelegramConfigured, passOpenKeyboard } = require('./telegramBot');
 const { normalizeEthiopianPhone } = require('./phone');
 const { ROLES } = require('./roles');
-const { SMS_BRAND } = require('./brand');
 const { isTrialSubscription } = require('./gymTrial');
 
 const MESSAGE_CHANNELS = Object.freeze({
@@ -275,7 +274,7 @@ async function deliverMessage({
 }
 
 /**
- * Member notifications use Telegram only (SMS reserved for OTP + gym license alerts).
+ * Member notifications use Telegram only (SMS reserved for OTP).
  * @param {{ telegram_chat_id?: number|null, preferred_channel?: string|null, phone?: string|null }} member
  */
 function resolveMemberChannel(member) {
@@ -342,7 +341,8 @@ async function deliverMemberMessage(member, {
 async function getGymOwnerContact(gymId) {
   const result = await db.query(
     `
-    SELECT g.name AS gym_name, g.phone, u.name AS owner_name
+    SELECT g.name AS gym_name, g.phone, g.telegram_chat_id, g.telegram_linked_at,
+           u.name AS owner_name
     FROM Gyms g
     LEFT JOIN Users u ON u.gym_id = g.id AND u.role = $2
     WHERE g.id = $1
@@ -354,6 +354,42 @@ async function getGymOwnerContact(gymId) {
 }
 
 /**
+ * Gym license / trial alerts use Telegram only (SMS reserved for OTP).
+ * @param {{ id: number, telegram_chat_id?: number|null, phone?: string|null }} gym
+ */
+function resolveGymChannel(gym) {
+  const chatId = gym?.telegram_chat_id;
+  if (chatId && isTelegramConfigured()) {
+    return {
+      channel: MESSAGE_CHANNELS.TELEGRAM,
+      to: String(chatId),
+    };
+  }
+  return { channel: null, to: null };
+}
+
+function gymReachable(gym) {
+  return Boolean(gym?.telegram_chat_id && isTelegramConfigured());
+}
+
+async function deliverGymMessage(gym, { message, messageType, skipDailyDedupe = false }) {
+  const route = resolveGymChannel(gym);
+  if (route.channel !== MESSAGE_CHANNELS.TELEGRAM || !route.to) {
+    return { ok: false, error: 'telegram_not_linked' };
+  }
+  return deliverMessage({
+    channel: MESSAGE_CHANNELS.TELEGRAM,
+    to: route.to,
+    message,
+    messageType,
+    entityType: 'gym',
+    entityId: gym.id,
+    skipDailyDedupe,
+    memberPhone: gym.phone || null,
+  });
+}
+
+/**
  * @param {{ id: number, name: string, phone?: string|null, telegram_chat_id?: number|null, preferred_channel?: string|null, end_date?: string }} member
  * @param {string} gymName
  */
@@ -361,7 +397,7 @@ async function smsMemberDueSoon(member, gymName) {
   if (!memberReachable(member)) return { ok: false, error: 'no_contact' };
   const firstName = memberFirstName(member.name);
   const endDate = formatDisplayDateFromIso(member.end_date) || 'soon';
-  const message = `Hi ${firstName}, your membership at ${gymName} ends on ${endDate}. Renew at the front desk to stay active.`;
+  const message = `Hi ${firstName}, your membership at ${gymName} ends on ${endDate}.`;
   return deliverMemberMessage(member, {
     message,
     messageType: SMS_TYPES.MEMBER_DUE_SOON,
@@ -533,75 +569,68 @@ async function smsMemberPassLink(member, gymName, passUrl) {
   });
 }
 
-async function smsGymLicenseDueIn3Days(gym, endDate, planName) {
+async function resolveGymForAlert(gym) {
   const contact = await getGymOwnerContact(gym.id);
-  const phone = contact?.phone || gym.phone;
-  if (!phone) return { ok: false, error: 'no_phone' };
-  const gymName = gym.name || contact?.gym_name || 'your gym';
+  return {
+    id: gym.id,
+    name: gym.name || contact?.gym_name || 'your gym',
+    phone: contact?.phone || gym.phone || null,
+    telegram_chat_id: gym.telegram_chat_id ?? contact?.telegram_chat_id ?? null,
+    saas_plan_id: gym.saas_plan_id,
+    plan: gym.plan,
+  };
+}
+
+async function smsGymLicenseDueIn3Days(gym, endDate, planName) {
+  const target = await resolveGymForAlert(gym);
+  if (!gymReachable(target)) return { ok: false, error: 'telegram_not_linked' };
   const endDisplay = formatDisplayDateFromIso(endDate);
   const isTrial = isTrialSubscription(gym);
   const message = isTrial
-    ? `${SMS_BRAND}: Your free trial for ${gymName} ends in 3 days (${endDisplay}). Contact your platform admin to subscribe and keep access.`
-    : `${SMS_BRAND}: Your platform license for ${gymName} (${planName || 'plan'}) ends in 3 days (${endDisplay}). Contact your administrator to renew.`;
-  return deliverSms({
-    to: phone,
+    ? `Your free trial for ${target.name} ends in 3 days (${endDisplay}). Contact your platform admin to subscribe and keep access.`
+    : `Your platform license for ${target.name} (${planName || 'plan'}) ends in 3 days (${endDisplay}). Contact your administrator to renew.`;
+  return deliverGymMessage(target, {
     message,
     messageType: isTrial ? SMS_TYPES.GYM_TRIAL_DUE_IN_3_DAYS : SMS_TYPES.GYM_LICENSE_DUE_IN_3_DAYS,
-    entityType: 'gym',
-    entityId: gym.id,
   });
 }
 
 async function smsGymLicenseExpiresToday(gym) {
-  const contact = await getGymOwnerContact(gym.id);
-  const phone = contact?.phone || gym.phone;
-  if (!phone) return { ok: false, error: 'no_phone' };
-  const gymName = gym.name || contact?.gym_name || 'your gym';
+  const target = await resolveGymForAlert(gym);
+  if (!gymReachable(target)) return { ok: false, error: 'telegram_not_linked' };
   const isTrial = isTrialSubscription(gym);
   const message = isTrial
-    ? `${SMS_BRAND}: Your free trial for ${gymName} ends today. Contact your platform admin to subscribe before access is paused.`
-    : `${SMS_BRAND}: Your platform license for ${gymName} expires today. Renew now to avoid interruption.`;
-  return deliverSms({
-    to: phone,
+    ? `Your free trial for ${target.name} ends today. Contact your platform admin to subscribe before access is paused.`
+    : `Your platform license for ${target.name} expires today. Renew now to avoid interruption.`;
+  return deliverGymMessage(target, {
     message,
     messageType: isTrial ? SMS_TYPES.GYM_TRIAL_EXPIRES_TODAY : SMS_TYPES.GYM_LICENSE_EXPIRES_TODAY,
-    entityType: 'gym',
-    entityId: gym.id,
   });
 }
 
 async function smsGymLicenseExpired(gym, endDate) {
-  const contact = await getGymOwnerContact(gym.id);
-  const phone = contact?.phone || gym.phone;
-  if (!phone) return { ok: false, error: 'no_phone' };
-  const gymName = gym.name || contact?.gym_name || 'your gym';
+  const target = await resolveGymForAlert(gym);
+  if (!gymReachable(target)) return { ok: false, error: 'telegram_not_linked' };
   const endDisplay = formatDisplayDateFromIso(endDate);
   const isTrial = isTrialSubscription(gym);
   const message = isTrial
-    ? `${SMS_BRAND}: Your free trial for ${gymName} ended on ${endDisplay}. Contact your platform admin to subscribe and restore access.`
-    : `${SMS_BRAND}: Your platform license for ${gymName} expired on ${endDisplay}. Contact your administrator to restore access.`;
-  return deliverSms({
-    to: phone,
+    ? `Your free trial for ${target.name} ended on ${endDisplay}. Contact your platform admin to subscribe and restore access.`
+    : `Your platform license for ${target.name} expired on ${endDisplay}. Contact your administrator to restore access.`;
+  return deliverGymMessage(target, {
     message,
     messageType: isTrial ? SMS_TYPES.GYM_TRIAL_EXPIRED : SMS_TYPES.GYM_LICENSE_EXPIRED,
-    entityType: 'gym',
-    entityId: gym.id,
   });
 }
 
 async function smsGymLicenseRenewed(gym, endDate, planName) {
-  const contact = await getGymOwnerContact(gym.id);
-  const phone = contact?.phone || gym.phone;
-  if (!phone) return { ok: false, error: 'no_phone' };
-  const gymName = gym.name || contact?.gym_name || 'your gym';
+  const target = await resolveGymForAlert(gym);
+  if (!gymReachable(target)) return { ok: false, error: 'telegram_not_linked' };
   const ends = formatDisplayDateFromIso(endDate) || 'soon';
-  const message = `${SMS_BRAND}: Your platform license for ${gymName} (${planName || 'plan'}) has been renewed. New term ends on ${ends}.`;
-  return deliverSms({
-    to: phone,
+  const message = `Your platform license for ${target.name} (${planName || 'plan'}) has been renewed. New term ends on ${ends}.`;
+  return deliverGymMessage(target, {
     message,
     messageType: SMS_TYPES.GYM_LICENSE_RENEWED,
-    entityType: 'gym',
-    entityId: gym.id,
+    skipDailyDedupe: true,
   });
 }
 
@@ -634,5 +663,8 @@ module.exports = {
   smsGymLicenseExpired,
   smsGymLicenseRenewed,
   getGymOwnerContact,
+  resolveGymChannel,
+  gymReachable,
+  deliverGymMessage,
   logSms,
 };

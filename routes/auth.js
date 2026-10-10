@@ -38,16 +38,13 @@ const {
   loginSchema,
   registerAdminSchema,
   registerGymSchema,
-  forgotPasswordSchema,
   requestForgotOtpSchema,
   resetForgotOtpSchema,
   gymSignupRequestOtpSchema,
   gymSignupVerifyOtpSchema,
   gymSignupCompleteSchema,
-  resetPasswordSchema,
   changePasswordSchema,
 } = require('../validation/schemas');
-const { sendEmail } = require('../utils/email');
 const { verifyOtp } = require('../utils/smsProvider');
 const {
   PURPOSE,
@@ -63,10 +60,6 @@ const { registerGymWithOwner } = require('../utils/registerGymCore');
 const { linkSignupOtpToGym } = require('../utils/notificationSms');
 const { setAuthCookie, clearAuthCookie } = require('../utils/authCookies');
 const { buildAuthSessionPayload } = require('../utils/authSessionResponse');
-const {
-  createPasswordResetToken,
-  consumeResetToken,
-} = require('../utils/passwordReset');
 const { buildTokenPayload } = require('../utils/authTokens');
 const {
   findGymOwnerByUsername,
@@ -494,13 +487,6 @@ router.post('/register-admin', registerAdminLimiter, adminSetupGuard, validateBo
   }
 });
 
-const FORGOT_PASSWORD_MESSAGE =
-  'If an account exists for that email, a password reset link has been sent.';
-
-function frontendBaseUrl() {
-  return (process.env.FRONTEND_URL || 'http://localhost:5173').replace(/\/$/, '');
-}
-
 /**
  * POST /api/auth/forgot-password/request-otp
  * Gym owner password reset — OTP to registered gym phone.
@@ -598,66 +584,6 @@ router.post(
     }
   }
 );
-
-/**
- * POST /api/auth/forgot-password
- * Sends a reset link (or logs it when SMTP is not configured).
- */
-router.post('/forgot-password', forgotPasswordLimiter, validateBody(forgotPasswordSchema), async (req, res, next) => {
-  const { email } = req.body;
-
-  try {
-    const result = await db.query('SELECT id, name, email FROM Users WHERE email = $1', [email]);
-    if (result.rows.length > 0) {
-      const user = result.rows[0];
-      const { token } = await createPasswordResetToken(user.id);
-      const resetUrl = `${frontendBaseUrl()}/reset-password?token=${encodeURIComponent(token)}`;
-
-      await sendEmail({
-        to: user.email,
-        subject: 'Reset your VibeSaaS password',
-        text: [
-          `Hello ${user.name},`,
-          '',
-          'We received a request to reset your password.',
-          `Use this link within 1 hour: ${resetUrl}`,
-          '',
-          'If you did not request this, you can ignore this email.',
-        ].join('\n'),
-      });
-    }
-
-    res.json({ message: FORGOT_PASSWORD_MESSAGE });
-  } catch (error) {
-    next(error);
-  }
-});
-
-/**
- * POST /api/auth/reset-password
- * Sets a new password using a valid reset token.
- */
-router.post('/reset-password', resetPasswordLimiter, validateBody(resetPasswordSchema), async (req, res, next) => {
-  const { token, password: newPassword } = req.body;
-
-  try {
-    const userId = await consumeResetToken(token);
-    if (!userId) {
-      return res.status(400).json({ error: 'Invalid or expired reset link. Please request a new one.' });
-    }
-
-    const hashedPassword = await bcrypt.hash(newPassword, 10);
-    await db.query(
-      `UPDATE Users SET password = $1, password_changed_at = CURRENT_TIMESTAMP WHERE id = $2`,
-      [hashedPassword, userId]
-    );
-    await db.query('DELETE FROM PasswordResetTokens WHERE user_id = $1', [userId]);
-
-    res.json({ message: 'Password updated. You can sign in with your new password.' });
-  } catch (error) {
-    next(error);
-  }
-});
 
 /**
  * POST /api/auth/change-password

@@ -52,7 +52,7 @@ async function emailGymOwnerMemberAlert(gymId, subject, intro, members) {
     '',
     `Gym: ${owner.gym_name}`,
     '',
-    'Log in to your VibeSaaS dashboard to renew memberships or follow up with members.',
+    'Log in to your Niku dashboard to renew memberships or follow up with members.',
   ].join('\n');
 
   await sendEmail({
@@ -118,7 +118,7 @@ async function emailPlatformAdminsTrialsEndingAlert(gyms) {
     admins.map((admin) =>
       sendEmail({
         to: admin.email,
-        subject: `[VibeSaaS] ${gyms.length} free trial(s) ending this week`,
+        subject: `[Niku] ${gyms.length} free trial(s) ending this week`,
         text: `Hello ${admin.name},\n\n${text}`,
       })
     )
@@ -137,14 +137,14 @@ async function emailPlatformAdminsLicenseAlert(subject, bodyLines) {
     '',
     ...bodyLines,
     '',
-    'Review the gym in the VibeSaaS admin dashboard.',
+    'Review the gym in the Niku admin dashboard.',
   ].join('\n');
 
   await Promise.all(
     admins.map((admin) =>
       sendEmail({
         to: admin.email,
-        subject: `[VibeSaaS] ${subject}`,
+        subject: `[Niku] ${subject}`,
         text: `Hello ${admin.name},\n\n${text}`,
       })
     )
