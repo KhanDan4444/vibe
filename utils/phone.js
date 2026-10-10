@@ -3,6 +3,9 @@
  * @description Ethiopian phone normalization for SMS (Afro Message expects +251…).
  */
 
+/** Ethio Telecom (9…) and Safaricom (7…) mobile national numbers. */
+const NATIONAL_MOBILE_RE = /^[79]\d{8}$/;
+
 /** @param {string|null|undefined} input */
 function normalizeEthiopianPhone(input) {
   if (input == null || input === '') return null;
@@ -19,6 +22,8 @@ function normalizeEthiopianPhone(input) {
   }
 
   if (digits.length !== 12) return null;
+  const national = digits.slice(3);
+  if (!NATIONAL_MOBILE_RE.test(national)) return null;
   return `+${digits}`;
 }
 
