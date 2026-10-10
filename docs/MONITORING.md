@@ -1,22 +1,46 @@
 # Monitoring (Sentry + uptime)
 
-## Sentry (API errors)
+Use **three Sentry projects** (separate DSNs): API, Web, Mobile. Leave DSNs unset in local/dev — Sentry stays off.
 
-1. Sign up at [sentry.io](https://sentry.io) → create a **Node.js / Express** project.
-2. Copy the **DSN** (Settings → Client Keys).
-3. Set on Railway (or your host):
+## Sentry — API (Node / Express)
+
+1. Create a **Node.js / Express** project at [sentry.io](https://sentry.io).
+2. Set on Railway:
 
 ```bash
 SENTRY_DSN=https://…@….ingest.sentry.io/…
 SENTRY_ENVIRONMENT=production
 ```
 
-4. Redeploy the API. Startup log should show `[sentry] Enabled`.
-5. Optional test: temporarily throw in a route, confirm the issue appears in Sentry, then revert.
+3. Redeploy. Startup log: `[sentry] Enabled`.
+4. Reports unhandled 5xx / crashes. Auth headers/cookies stripped. 4xx not sent.
 
-**Local:** leave `SENTRY_DSN` unset — Sentry stays off.
+## Sentry — Web (React / Vite)
 
-**What gets reported:** unhandled 5xx and crashes. Auth headers/cookies are stripped. 4xx are not sent.
+1. Create a **React** (browser) project in Sentry (different from API).
+2. Set on Vercel (or your host) as build env:
+
+```bash
+VITE_SENTRY_DSN=https://…@….ingest.sentry.io/…
+VITE_SENTRY_ENVIRONMENT=production
+```
+
+3. Redeploy the frontend. Unhandled errors + React error boundary are reported.
+4. Leave unset locally.
+
+## Sentry — Mobile (Expo / React Native)
+
+1. Create a **React Native** project in Sentry (different DSN again).
+2. Set for EAS builds (EAS Secrets or `eas.json` env):
+
+```bash
+EXPO_PUBLIC_SENTRY_DSN=https://…@….ingest.sentry.io/…
+EXPO_PUBLIC_SENTRY_ENVIRONMENT=production
+```
+
+3. Rebuild the app (Expo Go / new native build picks up the public env).
+4. Optional for source maps on EAS: add secret `SENTRY_AUTH_TOKEN` and configure org/project on the `@sentry/react-native` Expo plugin.
+5. Leave unset in local `.env` while developing.
 
 ## Uptime
 
@@ -50,6 +74,6 @@ API_BASE=https://your-host ./scripts/uptime-check.sh
 
 ## Later
 
-- Web/mobile Sentry projects (separate DSNs)
 - Log shipper when you leave Railway for a VPS
 - Prometheus/Grafana only if you need server metrics dashboards
+- Session Replay / performance tracing (`*_TRACES_SAMPLE_RATE`) if volume stays low
