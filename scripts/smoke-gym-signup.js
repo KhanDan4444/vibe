@@ -9,8 +9,6 @@
  */
 require('dotenv').config({ path: require('path').join(__dirname, '..', '.env') });
 
-const db = require('../config/db');
-
 const BASE = (process.env.API_BASE || `http://localhost:${process.env.PORT || 5000}/api`).replace(
   /\/$/,
   ''
@@ -38,22 +36,6 @@ function assert(label, condition, detail = '') {
 
 function uniqueSuffix() {
   return String(Date.now()).slice(-8);
-}
-
-async function latestOtpCode(phoneNormalized) {
-  const result = await db.query(
-    `
-    SELECT otp_code
-    FROM SmsLog
-    WHERE message_type = 'otp_gym_signup'
-      AND recipient_phone = $1
-      AND otp_code IS NOT NULL
-    ORDER BY sent_at DESC
-    LIMIT 1
-    `,
-    [phoneNormalized]
-  );
-  return result.rows[0]?.otp_code || null;
 }
 
 async function loginAdmin() {
@@ -96,8 +78,8 @@ async function testPublicGymSignupNoTrial() {
 
   const { normalizeEthiopianPhone } = require('../utils/phone');
   const normalized = normalizeEthiopianPhone(phone);
-  const code = await latestOtpCode(normalized);
-  assert('OTP code readable from SmsLog (local/dev SMS)', Boolean(code), 'no otp_code in SmsLog');
+  const code = otpReq.data.devCode;
+  assert('Local signup OTP echoed for smoke only', Boolean(code), 'no devCode (production API hides it)');
 
   const verify = await request('POST', '/auth/gym-signup/verify-otp', {
     sessionId,
@@ -226,15 +208,7 @@ async function main() {
   console.log('\nGym signup / enroll smoke passed.');
 }
 
-main()
-  .catch((err) => {
-    console.error('\n' + err.message);
-    process.exitCode = 1;
-  })
-  .finally(async () => {
-    try {
-      await db.pool.end();
-    } catch {
-      // ignore
-    }
-  });
+main().catch((err) => {
+  console.error('\n' + err.message);
+  process.exitCode = 1;
+});

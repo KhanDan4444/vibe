@@ -3,6 +3,7 @@
  * @description Telegram Bot API webhook for member linking.
  */
 
+const crypto = require('crypto');
 const express = require('express');
 const router = express.Router();
 const { sendMessage, isTelegramConfigured, botUsername } = require('../utils/telegramBot');
@@ -20,10 +21,14 @@ const {
 } = require('../utils/telegramMemberBot');
 
 function verifyWebhookSecret(req) {
-  const expected = process.env.TELEGRAM_WEBHOOK_SECRET?.trim();
-  if (!expected) return true;
-  const received = req.get('X-Telegram-Bot-Api-Secret-Token');
-  return received === expected;
+  const expected = process.env.TELEGRAM_WEBHOOK_SECRET?.trim() || '';
+  if (!expected) {
+    return process.env.NODE_ENV !== 'production';
+  }
+  const received = String(req.get('X-Telegram-Bot-Api-Secret-Token') || '');
+  const a = crypto.createHash('sha256').update(expected).digest();
+  const b = crypto.createHash('sha256').update(received).digest();
+  return crypto.timingSafeEqual(a, b);
 }
 
 function linkErrorMessage(code) {

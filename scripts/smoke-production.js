@@ -51,12 +51,14 @@ async function api(method, path, body) {
 }
 
 function stationSecret() {
-  return process.env.MEMBER_PASS_SECRET || process.env.JWT_SECRET;
+  return process.env.NODE_ENV === 'production'
+    ? String(process.env.MEMBER_PASS_SECRET || '').trim()
+    : String(process.env.MEMBER_PASS_SECRET || process.env.JWT_SECRET || '').trim();
 }
 
 function signStationPass(gymId, branchId, stationVersion) {
   const secret = stationSecret();
-  if (!secret) throw new Error('JWT_SECRET not set');
+  if (!secret) throw new Error('MEMBER_PASS_SECRET not set');
   return jwt.sign(
     { typ: 'checkin_station', gid: gymId, bid: branchId, sv: stationVersion },
     secret,

@@ -7,6 +7,7 @@ const crypto = require('crypto');
 const db = require('../config/db');
 const { normalizeEthiopianPhone } = require('./phone');
 const { verifyStationPass, loadBranchStationContext } = require('./stationPass');
+const { passSigningSecret } = require('./passSigningSecret');
 const {
   getGymAttendanceSettings,
   evaluateCheckInEligibility,
@@ -22,7 +23,7 @@ const OTP_COOLDOWN_MS = 60 * 1000;
 const DEVICE_MAX_AGE_MS = 10 * 365 * 24 * 60 * 60 * 1000;
 
 function stationSecret() {
-  return process.env.MEMBER_PASS_SECRET || process.env.JWT_SECRET;
+  return passSigningSecret();
 }
 
 function hashValue(value) {

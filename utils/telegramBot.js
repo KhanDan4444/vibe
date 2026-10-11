@@ -118,6 +118,9 @@ async function ensureWebhookRegistered() {
   if (!webhookUrl || !isTelegramConfigured()) return { ok: false, skipped: true };
 
   const secret = process.env.TELEGRAM_WEBHOOK_SECRET?.trim();
+  if (process.env.NODE_ENV === 'production' && !secret) {
+    throw new Error('TELEGRAM_WEBHOOK_SECRET is required to register the production webhook.');
+  }
   const body = { url: webhookUrl, allowed_updates: ['message'] };
   if (secret) body.secret_token = secret;
 

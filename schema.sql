@@ -308,7 +308,6 @@ CREATE TABLE IF NOT EXISTS SmsLog (
     entity_type VARCHAR(32),
     entity_id INT,
     message_id VARCHAR(255),
-    otp_code VARCHAR(8),
     sent_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
 );
 

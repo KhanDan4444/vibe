@@ -1207,7 +1207,6 @@ router.get('/gym-sms', validateQuery(adminGymSmsQuerySchema), async (req, res, n
         s.entity_type,
         s.entity_id,
         s.message_id,
-        s.otp_code,
         s.sent_at,
         COALESCE(g.id, g_phone.id) AS gym_id,
         COALESCE(g.name, g_phone.name) AS gym_name,

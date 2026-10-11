@@ -11,6 +11,16 @@ if (!process.env.JWT_SECRET) {
   process.exit(1);
 }
 
+if (process.env.NODE_ENV === 'production' && !String(process.env.TELEGRAM_WEBHOOK_SECRET || '').trim()) {
+  console.error('FATAL: TELEGRAM_WEBHOOK_SECRET is not set. Refusing to start.');
+  process.exit(1);
+}
+
+if (process.env.NODE_ENV === 'production' && !String(process.env.MEMBER_PASS_SECRET || '').trim()) {
+  console.error('FATAL: MEMBER_PASS_SECRET is not set. Refusing to start.');
+  process.exit(1);
+}
+
 if (process.env.SENTRY_DSN) {
   console.log(
     `[sentry] Enabled (env=${process.env.SENTRY_ENVIRONMENT || process.env.NODE_ENV || 'development'})`

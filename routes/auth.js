@@ -151,8 +151,8 @@ router.post(
     }
     const { phone } = req.body;
     try {
-      const { sessionId, expiresAt, reused } = await startPhoneOtpSession(PURPOSE.GYM_SIGNUP, phone);
-      res.json(buildGymSignupOtpPayload(sessionId, expiresAt, reused));
+      const { sessionId, expiresAt, reused, devCode } = await startPhoneOtpSession(PURPOSE.GYM_SIGNUP, phone);
+      res.json(buildGymSignupOtpPayload(sessionId, expiresAt, reused, devCode));
     } catch (error) {
       next(error);
     }

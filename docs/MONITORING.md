@@ -39,8 +39,9 @@ EXPO_PUBLIC_SENTRY_ENVIRONMENT=production
 ```
 
 3. Rebuild the app (Expo Go / new native build picks up the public env).
-4. Optional for source maps on EAS: add secret `SENTRY_AUTH_TOKEN` and configure org/project on the `@sentry/react-native` Expo plugin.
-5. Leave unset in local `.env` while developing.
+4. EAS builds currently set `SENTRY_DISABLE_AUTO_UPLOAD=true` so Gradle succeeds without an auth token (JS errors still report via DSN). Org is EU: plugin `url` is `https://de.sentry.io/`.
+5. Optional later: create a Sentry auth token → EAS secret `SENTRY_AUTH_TOKEN`, then remove `SENTRY_DISABLE_AUTO_UPLOAD` for readable stack traces.
+6. Leave DSN unset in local `.env` while developing.
 
 ## Uptime
 

@@ -112,7 +112,6 @@ async function logOtpDelivery(purpose, normalized, otpResult) {
       purpose,
       phone: normalized,
       messageId: otpResult.message_id || otpResult.verificationId,
-      otpCode: otpResult.code ?? null,
     });
   } catch (logErr) {
     console.error('[SMS] OTP audit log failed:', logErr.message);
@@ -168,7 +167,12 @@ async function startPhoneOtpSession(purpose, phone, meta = {}) {
       const otpResult = await sendManagedOtp(normalized, managed, smsOptions);
       await client.query('COMMIT');
       await logOtpDelivery(purpose, normalized, otpResult);
-      return { sessionId, expiresAt, phone: normalized };
+      return {
+        sessionId,
+        expiresAt,
+        phone: normalized,
+        devCode: devOtpEcho(managed.code),
+      };
     }
 
     const otpResult = await sendOtp(normalized, smsOptions);
@@ -183,7 +187,12 @@ async function startPhoneOtpSession(purpose, phone, meta = {}) {
     await client.query('COMMIT');
     await logOtpDelivery(purpose, normalized, otpResult);
 
-    return { sessionId, expiresAt, phone: normalized };
+    return {
+      sessionId,
+      expiresAt,
+      phone: normalized,
+      devCode: devOtpEcho(otpResult.code),
+    };
   } catch (error) {
     try {
       await client.query('ROLLBACK');
@@ -273,8 +282,13 @@ function buildOtpRequestPayload(sessionId, expiresAt, reused = false) {
   };
 }
 
-function buildGymSignupOtpPayload(sessionId, expiresAt, reused = false) {
-  return {
+function devOtpEcho(code) {
+  if (process.env.NODE_ENV === 'production' || code == null || code === '') return undefined;
+  return String(code);
+}
+
+function buildGymSignupOtpPayload(sessionId, expiresAt, reused = false, devCode) {
+  const payload = {
     message: reused
       ? OTP_ALREADY_SENT
       : 'Verification code sent to your phone.',
@@ -282,6 +296,8 @@ function buildGymSignupOtpPayload(sessionId, expiresAt, reused = false) {
     expiresAt,
     reused: Boolean(reused),
   };
+  if (devCode) payload.devCode = devCode;
+  return payload;
 }
 
 module.exports = {

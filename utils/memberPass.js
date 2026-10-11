@@ -6,13 +6,14 @@
 const crypto = require('crypto');
 const jwt = require('jsonwebtoken');
 const db = require('../config/db');
+const { passSigningSecret } = require('./passSigningSecret');
 
 const PASS_TYPE = 'member_pass';
 const PUBLIC_CODE_ALPHABET = 'abcdefghijkmnopqrstuvwxyz23456789';
 const PUBLIC_CODE_LENGTH = 8;
 
 function passSecret() {
-  return process.env.MEMBER_PASS_SECRET || process.env.JWT_SECRET;
+  return passSigningSecret();
 }
 
 /**
@@ -22,7 +23,7 @@ function passSecret() {
 function signMemberPass({ gymId, memberId, passVersion }) {
   const secret = passSecret();
   if (!secret) {
-    throw new Error('MEMBER_PASS_SECRET / JWT_SECRET is not configured.');
+    throw new Error('MEMBER_PASS_SECRET is not configured.');
   }
   return jwt.sign(
     {

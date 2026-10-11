@@ -12,7 +12,6 @@ const {
   signMemberPass,
   normalizePassPublicCode,
 } = require('../utils/memberPass');
-const { memberPhotoToDataUrl } = require('../utils/memberPhotos');
 const { publicMemberPassLimiter } = require('../middleware/rateLimiters');
 const { isTelegramConfigured, botUsername } = require('../utils/telegramBot');
 const { createLinkToken } = require('../utils/telegramLink');
@@ -20,7 +19,7 @@ const { createLinkToken } = require('../utils/telegramLink');
 async function loadMemberByPassCode(code) {
   const result = await db.query(
     `
-    SELECT m.id, m.gym_id, m.name, m.phone, m.photo_url, m.pass_version, m.deleted_at, m.status,
+    SELECT m.id, m.gym_id, m.name, m.pass_version, m.deleted_at, m.status,
            m.end_date, m.telegram_chat_id, m.telegram_linked_at, m.preferred_channel,
            g.name AS gym_name, b.name AS branch_name
     FROM Members m
@@ -60,8 +59,6 @@ async function buildPassPayload(member, gymId) {
     member: {
       id: member.id,
       name: member.name,
-      phone: member.phone,
-      photo_data_url: memberPhotoToDataUrl(member.photo_url),
       branch_name: member.branch_name || null,
       status: member.status,
       end_date: member.end_date,
@@ -105,7 +102,7 @@ router.get('/member-pass', publicMemberPassLimiter, async (req, res, next) => {
 
     const result = await db.query(
       `
-      SELECT m.id, m.name, m.phone, m.photo_url, m.pass_version, m.deleted_at, m.status,
+      SELECT m.id, m.name, m.pass_version, m.deleted_at, m.status,
              m.end_date, m.telegram_chat_id, m.telegram_linked_at, m.preferred_channel,
              g.name AS gym_name, b.name AS branch_name
       FROM Members m

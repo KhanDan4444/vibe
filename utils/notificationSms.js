@@ -64,7 +64,6 @@ async function logMessage({
   entityType,
   entityId,
   messageId,
-  otpCode,
 }) {
   await db.query(
     `
@@ -75,10 +74,9 @@ async function logMessage({
       message_type,
       entity_type,
       entity_id,
-      message_id,
-      otp_code
+      message_id
     )
-    VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+    VALUES ($1, $2, $3, $4, $5, $6, $7)
   `,
     [
       recipientPhone,
@@ -88,13 +86,12 @@ async function logMessage({
       entityType,
       entityId ?? null,
       messageId ?? null,
-      otpCode ?? null,
     ]
   );
 }
 
 /** @deprecated Use logMessage */
-async function logSms({ recipientPhone, messageType, entityType, entityId, messageId, otpCode }) {
+async function logSms({ recipientPhone, messageType, entityType, entityId, messageId }) {
   return logMessage({
     channel: MESSAGE_CHANNELS.SMS,
     recipientPhone,
@@ -102,12 +99,11 @@ async function logSms({ recipientPhone, messageType, entityType, entityId, messa
     entityType,
     entityId,
     messageId,
-    otpCode,
   });
 }
 
-/** Audit log for OTP sends (entity_id stays null so repeat sends are all logged). */
-async function logOtpSms({ purpose, phone, messageId, otpCode }) {
+/** Audit log for OTP sends (entity_id stays null so repeat sends are all logged). Never stores the code. */
+async function logOtpSms({ purpose, phone, messageId }) {
   const messageType = OTP_PURPOSE_TO_MESSAGE_TYPE[purpose];
   if (!messageType || !phone) return;
   await logSms({
@@ -116,7 +112,6 @@ async function logOtpSms({ purpose, phone, messageId, otpCode }) {
     entityType: 'otp',
     entityId: null,
     messageId,
-    otpCode: otpCode != null ? String(otpCode) : null,
   });
 }
 
