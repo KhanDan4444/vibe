@@ -1164,7 +1164,7 @@ router.post('/:id/renew', requireActiveSubscription, validateParams(idParamSchem
 
 /**
  * POST /api/members/:id/change-plan
- * Switch plan mid-term for an active member, or before first payment when enrolled unpaid.
+ * Switch plan mid-term for an active member, or before first payment when unpaid (active or due soon).
  */
 router.post(
   '/:id/change-plan',
@@ -1198,8 +1198,10 @@ router.post(
 
       const currentMember = memberResult.rows[0];
       const memberStatus = normalizeMemberStatus(currentMember.status);
+      const paidForCurrentTerm = await queryMemberPaidForCurrentTerm(client, id, gym_id);
+      const unpaidDueSoon = !paidForCurrentTerm && memberStatus === MEMBER_STATUS.DUE_SOON;
 
-      if (memberStatus !== MEMBER_STATUS.ACTIVE) {
+      if (memberStatus !== MEMBER_STATUS.ACTIVE && !unpaidDueSoon) {
         await client.query('ROLLBACK');
         return res.status(409).json({
           error:
@@ -1208,8 +1210,6 @@ router.post(
               : 'Plan changes are only available for active memberships.',
         });
       }
-
-      const paidForCurrentTerm = await queryMemberPaidForCurrentTerm(client, id, gym_id);
 
       const targetPlanId = plan_id;
       if (targetPlanId === currentMember.plan_id) {
