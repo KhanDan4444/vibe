@@ -29,10 +29,12 @@ const BRANCH_LIST_SQL = `
   SELECT
     b.*,
     COUNT(DISTINCT m.id)::int AS member_count,
-    COUNT(DISTINCT u.id) FILTER (WHERE u.is_active = true)::int AS staff_count
+    COUNT(DISTINCT u.id) FILTER (WHERE u.is_active = true)::int AS staff_count,
+    COUNT(DISTINCT tr.id) FILTER (WHERE tr.deleted_at IS NULL)::int AS trainer_count
   FROM Branches b
   LEFT JOIN Members m ON m.branch_id = b.id AND m.deleted_at IS NULL
   LEFT JOIN Users u ON u.branch_id = b.id AND u.gym_id = b.gym_id AND u.role = ANY($2::text[])
+  LEFT JOIN Trainers tr ON tr.branch_id = b.id AND tr.gym_id = b.gym_id
 `;
 
 function mapBranch(row) {
@@ -45,6 +47,7 @@ function mapBranch(row) {
     is_active: row.is_active,
     member_count: row.member_count != null ? parseInt(row.member_count, 10) : undefined,
     staff_count: row.staff_count != null ? parseInt(row.staff_count, 10) : undefined,
+    trainer_count: row.trainer_count != null ? parseInt(row.trainer_count, 10) : undefined,
   };
 }
 
@@ -107,7 +110,9 @@ router.post('/', requireGymOwner, requireActiveSubscription, validateBody(create
       `,
       [req.user.gym_id, name.trim(), phone?.trim() || null, address?.trim() || null]
     );
-    res.status(201).json({ branch: mapBranch({ ...result.rows[0], member_count: 0, staff_count: 0 }) });
+    res.status(201).json({
+      branch: mapBranch({ ...result.rows[0], member_count: 0, staff_count: 0, trainer_count: 0 }),
+    });
   } catch (error) {
     next(error);
   }
