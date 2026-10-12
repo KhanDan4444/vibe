@@ -86,7 +86,14 @@ router.get('/:id/members', validateParams(idParamSchema), async (req, res, next)
       return res.status(404).json({ error: 'Trainer not found.' });
     }
     const members = await db.query(
-      `SELECT ${MEMBER_LIST_SELECT}
+      `SELECT ${MEMBER_LIST_SELECT},
+        (
+          SELECT COALESCE(SUM(p.amount), 0)
+          FROM Payments p
+          WHERE p.member_id = m.id
+            AND p.gym_id = m.gym_id
+            AND COALESCE(p.source, 'collect') = 'trainer'
+        ) AS trainer_paid
        ${MEMBER_LIST_FROM}
        WHERE m.gym_id = $1 AND m.trainer_id = $2 AND m.deleted_at IS NULL
        ORDER BY m.name ASC`,
