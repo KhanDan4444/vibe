@@ -405,6 +405,7 @@ const adminSetPasswordSchema = z.object({
 const createStaffSchema = z.object({
   name: trimmed(200),
   email: optionalEmail,
+  phone: ethiopianPhone,
   username,
   password,
   staff_role: z.enum(STAFF_ROLES).default(DEFAULT_STAFF_ROLE),
@@ -415,6 +416,7 @@ const updateStaffSchema = z
   .object({
     name: trimmed(200).optional(),
     email: optionalEmail.optional(),
+    phone: ethiopianPhone.optional(),
     username: username.optional(),
     password: password.optional(),
     staff_role: z.enum(STAFF_ROLES).optional(),

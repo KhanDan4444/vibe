@@ -60,6 +60,17 @@ async function assignTrainerToMember(executor, {
     throw err;
   }
 
+  const memberRow = await executor.query(
+    `SELECT branch_id FROM Members WHERE id = $1 AND gym_id = $2`,
+    [memberId, gymId]
+  );
+  const memberBranchId = memberRow.rows[0]?.branch_id;
+  if (memberBranchId != null && Number(trainer.branch_id) !== Number(memberBranchId)) {
+    const err = new Error('Choose a trainer registered at this branch.');
+    err.statusCode = 400;
+    throw err;
+  }
+
   await executor.query(
     `UPDATE Members SET trainer_id = $1 WHERE id = $2 AND gym_id = $3`,
     [trainerId, memberId, gymId]

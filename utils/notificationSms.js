@@ -23,6 +23,7 @@ const SMS_TYPES = Object.freeze({
   MEMBER_RENEWED: 'member_renewed',
   MEMBER_ENROLLED: 'member_enrolled',
   MEMBER_PASS_LINK: 'member_pass_link',
+  MEMBER_MISSED_YOU: 'member_missed_you',
   MEMBER_TELEGRAM_LINKED: 'member_telegram_linked',
   GYM_LICENSE_DUE_SOON: 'gym_license_due_soon',
   GYM_LICENSE_DUE_IN_3_DAYS: 'gym_license_due_in_3_days',
@@ -399,6 +400,21 @@ async function smsMemberDueSoon(member, gymName) {
   });
 }
 
+async function smsMemberMissedYou(member, gymName) {
+  if (!memberReachable(member)) return { ok: false, error: 'no_contact' };
+  const firstName = memberFirstName(member.name);
+  const days = Number(member.days_without_visit);
+  const away =
+    days === 1 ? 'the past day' : `the past ${Number.isFinite(days) ? days : 7} days`;
+  const message =
+    `Hi ${firstName}, we haven't seen you for ${away}. ` +
+    `We missed you at ${gymName}. Don't lose the progress you've already made!`;
+  return deliverMemberMessage(member, {
+    message,
+    messageType: SMS_TYPES.MEMBER_MISSED_YOU,
+  });
+}
+
 async function smsMemberExpiresToday(member, gymName) {
   if (!memberReachable(member)) return { ok: false, error: 'no_contact' };
   const firstName = memberFirstName(member.name);
@@ -644,6 +660,7 @@ module.exports = {
   memberReachable,
   isMemberMessagingConfigured,
   smsMemberDueSoon,
+  smsMemberMissedYou,
   smsMemberExpiresToday,
   smsMemberExpired,
   smsMemberRenewed,

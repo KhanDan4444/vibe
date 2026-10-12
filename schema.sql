@@ -36,6 +36,7 @@ CREATE TABLE IF NOT EXISTS Users (
     email VARCHAR(255) UNIQUE,
     username VARCHAR(50) UNIQUE NOT NULL,
     password VARCHAR(255) NOT NULL,
+    phone VARCHAR(20), -- staff contact; gym owner login phone stays on Gyms
     role VARCHAR(50) NOT NULL, -- "Platform Admin", "Gym Owner", or staff job role e.g. "Front Desk"
     gym_id INT REFERENCES Gyms(id) ON DELETE SET NULL,
     is_active BOOLEAN DEFAULT true,

@@ -22,6 +22,7 @@ const MEMBER_SMS_TYPES = [
   'member_renewed',
   'member_enrolled',
   'member_pass_link',
+  'member_missed_you',
 ];
 
 router.use(auth, checkSubscription, requireGymAccess, requireGymOwner);

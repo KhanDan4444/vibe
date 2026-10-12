@@ -5,8 +5,10 @@
 
 const db = require('../config/db');
 const { MEMBER_STATUS, MEMBER_STATUS_CASE_SQL, ATTENTION_DUE_SOON_DAYS } = require('../utils/memberStatus');
+const { MEMBER_NO_VISIT_WEEK_SQL, MEMBER_DAYS_WITHOUT_VISIT_SELECT } = require('../utils/memberListSql');
 const {
   smsMemberDueSoon,
+  smsMemberMissedYou,
   smsMemberExpiresToday,
   smsMemberExpired,
   smsGymLicenseDueIn3Days,
@@ -307,6 +309,28 @@ async function runDailyExpiryCheck() {
     for (const [gymId, members] of todayByGym) {
       console.log(`[Notification Engine] Expiring today: ${members.length} member(s) at gym #${gymId}`);
       await smsMembersForGym(gymId, members, smsMemberExpiresToday);
+    }
+
+    const missedYouQuery = `
+      SELECT m.id, m.name, m.phone, m.gym_id, m.end_date, m.telegram_chat_id, m.preferred_channel,
+        ${MEMBER_DAYS_WITHOUT_VISIT_SELECT}
+      FROM Members m
+      WHERE m.deleted_at IS NULL
+        AND m.telegram_chat_id IS NOT NULL
+        AND (${MEMBER_NO_VISIT_WEEK_SQL})
+        AND NOT EXISTS (
+          SELECT 1 FROM SmsLog s
+          WHERE s.message_type = 'member_missed_you'
+            AND s.entity_type = 'member'
+            AND s.entity_id = m.id
+            AND (s.sent_at AT TIME ZONE 'UTC')::date > (CURRENT_DATE - INTERVAL '7 days')
+        );
+    `;
+    const missedResult = await db.query(missedYouQuery);
+    const missedByGym = groupMembersByGym(missedResult.rows);
+    for (const [gymId, members] of missedByGym) {
+      console.log(`[Notification Engine] Missed you: ${members.length} member(s) at gym #${gymId}`);
+      await smsMembersForGym(gymId, members, smsMemberMissedYou);
     }
 
     await runGymSaasExpiryCheck();
