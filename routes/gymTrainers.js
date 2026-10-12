@@ -18,6 +18,7 @@ const { ACTIONS, recordAuditLog } = require('../utils/auditLog');
 const { assertBranchInGym } = require('../utils/branches');
 const { resolveBranchScope } = require('../utils/branchScope');
 const { mapTrainerRow } = require('../utils/trainers');
+const { MEMBER_LIST_FROM, MEMBER_LIST_SELECT } = require('../utils/memberListSql');
 const { isGymOwner } = require('../utils/roles');
 const {
   parseCertificationDataUrl,
@@ -67,6 +68,33 @@ router.get('/', validateQuery(listQuerySchema), async (req, res, next) => {
       trainers: result.rows.map(mapTrainerRow),
       archivedTotal: countResult.rows[0].count,
       canManage: isGymOwner(req.user.role),
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+router.get('/:id/members', validateParams(idParamSchema), async (req, res, next) => {
+  const gymId = req.user.gym_id;
+  const { id } = req.params;
+  try {
+    const trainer = await db.query(
+      `SELECT id, name FROM Trainers WHERE id = $1 AND gym_id = $2`,
+      [id, gymId]
+    );
+    if (trainer.rows.length === 0) {
+      return res.status(404).json({ error: 'Trainer not found.' });
+    }
+    const members = await db.query(
+      `SELECT ${MEMBER_LIST_SELECT}
+       ${MEMBER_LIST_FROM}
+       WHERE m.gym_id = $1 AND m.trainer_id = $2 AND m.deleted_at IS NULL
+       ORDER BY m.name ASC`,
+      [gymId, id]
+    );
+    res.json({
+      trainer: { id: trainer.rows[0].id, name: trainer.rows[0].name },
+      members: members.rows,
     });
   } catch (error) {
     next(error);

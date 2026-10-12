@@ -72,6 +72,10 @@ const GYM_LIST_BASE = `
       WHERE m.end_date > CURRENT_DATE + INTERVAL '${DUE_SOON_DAYS} days'
         AND NOT (${MEMBER_UNPAID_SQL})
     )::int AS active_member_count,
+    (
+      SELECT COUNT(*)::int FROM Branches b
+      WHERE b.gym_id = g.id AND b.is_active = true
+    ) AS branch_count,
     gs.saas_plan_id AS saas_plan_id,
     gs.plan AS saas_plan_name,
     gs.start_date AS saas_start_date,
@@ -94,6 +98,10 @@ const GYM_LIST_ARCHIVED = `
       WHERE m.end_date > CURRENT_DATE + INTERVAL '${DUE_SOON_DAYS} days'
         AND NOT (${MEMBER_UNPAID_SQL})
     )::int AS active_member_count,
+    (
+      SELECT COUNT(*)::int FROM Branches b
+      WHERE b.gym_id = g.id AND b.is_active = true
+    ) AS branch_count,
     gs.saas_plan_id AS saas_plan_id,
     gs.plan AS saas_plan_name,
     gs.start_date AS saas_start_date,
@@ -421,7 +429,19 @@ router.get('/gyms/:id', async (req, res, next) => {
       [id]
       ),
       db.query(
-      'SELECT COUNT(*)::int AS branch_count FROM Branches WHERE gym_id = $1 AND is_active = true',
+      `
+      SELECT
+        b.id,
+        b.name,
+        b.is_default,
+        b.is_active,
+        COUNT(m.id)::int AS member_count
+      FROM Branches b
+      LEFT JOIN Members m ON m.branch_id = b.id AND m.gym_id = b.gym_id AND m.deleted_at IS NULL
+      WHERE b.gym_id = $1
+      GROUP BY b.id
+      ORDER BY b.is_default DESC, b.is_active DESC, b.name ASC
+      `,
       [id]
       ),
       db.query(
@@ -448,7 +468,8 @@ router.get('/gyms/:id', async (req, res, next) => {
       ...gym,
       stats: statsResult.rows[0],
       plan_count: plansResult.rows[0].plan_count,
-      branch_count: branchesResult.rows[0].branch_count,
+      branches: branchesResult.rows,
+      branch_count: branchesResult.rows.filter((row) => row.is_active).length,
       saas_subscription: saasSubResult.rows[0] || null,
       saas_payments: paymentsResult.rows,
     });
