@@ -79,7 +79,10 @@ router.get('/:id/members', validateParams(idParamSchema), async (req, res, next)
   const { id } = req.params;
   try {
     const trainer = await db.query(
-      `SELECT id, name FROM Trainers WHERE id = $1 AND gym_id = $2`,
+      `SELECT t.id, t.name, b.name AS branch_name
+       FROM Trainers t
+       LEFT JOIN Branches b ON b.id = t.branch_id
+       WHERE t.id = $1 AND t.gym_id = $2`,
       [id, gymId]
     );
     if (trainer.rows.length === 0) {
@@ -100,7 +103,11 @@ router.get('/:id/members', validateParams(idParamSchema), async (req, res, next)
       [gymId, id]
     );
     res.json({
-      trainer: { id: trainer.rows[0].id, name: trainer.rows[0].name },
+      trainer: {
+        id: trainer.rows[0].id,
+        name: trainer.rows[0].name,
+        branch_name: trainer.rows[0].branch_name,
+      },
       members: members.rows,
     });
   } catch (error) {
