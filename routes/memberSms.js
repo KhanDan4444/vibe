@@ -21,6 +21,7 @@ const MEMBER_SMS_TYPES = [
   'member_expired',
   'member_renewed',
   'member_enrolled',
+  'member_telegram_linked',
   'member_pass_link',
   'member_missed_you',
 ];
@@ -61,7 +62,10 @@ router.get('/', validateQuery(memberSmsQuerySchema), async (req, res, next) => {
       params.push(scope.branchId);
     }
 
-    if (typeFilter !== 'all' && MEMBER_SMS_TYPES.includes(typeFilter)) {
+    if (typeFilter === 'member_enrolled') {
+      conditions.push(`s.message_type = ANY($${params.length + 1}::text[])`);
+      params.push(['member_enrolled', 'member_telegram_linked']);
+    } else if (typeFilter !== 'all' && MEMBER_SMS_TYPES.includes(typeFilter)) {
       conditions.push(`s.message_type = $${params.length + 1}`);
       params.push(typeFilter);
     }
