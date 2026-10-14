@@ -52,20 +52,23 @@ function readDeviceToken(req) {
 }
 
 function setDeviceCookie(res, token) {
+  const production = process.env.NODE_ENV === 'production';
   res.cookie(STATION_DEVICE_COOKIE, token, {
     httpOnly: true,
-    secure: process.env.NODE_ENV === 'production',
-    sameSite: 'lax',
+    secure: production,
+    // The check-in page is on another host, so a Lax cookie is never sent back.
+    sameSite: production ? 'none' : 'lax',
     maxAge: DEVICE_MAX_AGE_MS,
     path: '/',
   });
 }
 
 function clearDeviceCookie(res) {
+  const production = process.env.NODE_ENV === 'production';
   res.clearCookie(STATION_DEVICE_COOKIE, {
     httpOnly: true,
-    secure: process.env.NODE_ENV === 'production',
-    sameSite: 'lax',
+    secure: production,
+    sameSite: production ? 'none' : 'lax',
     path: '/',
   });
 }
@@ -128,6 +131,8 @@ async function loadTrustedMember(station, deviceToken) {
       AND m.gym_id = $2
       AND m.deleted_at IS NULL
       AND m.telegram_chat_id IS NOT NULL
+      AND date_trunc('milliseconds', m.telegram_linked_at)
+          <= date_trunc('milliseconds', d.telegram_linked_at)
     LIMIT 1
     `,
     [tokenHash, station.gymId]
@@ -135,14 +140,6 @@ async function loadTrustedMember(station, deviceToken) {
 
   const row = result.rows[0];
   if (!row) return null;
-
-  if (row.member_telegram_linked_at && row.telegram_linked_at) {
-    const memberLinkedAt = new Date(row.member_telegram_linked_at).getTime();
-    const deviceLinkedAt = new Date(row.telegram_linked_at).getTime();
-    if (memberLinkedAt > deviceLinkedAt) {
-      return null;
-    }
-  }
 
   if (row.branch_id && Number(row.branch_id) !== Number(station.branchId)) {
     return null;
@@ -160,24 +157,23 @@ async function clearStationDevicesForMember(memberId) {
 }
 
 async function issueDeviceTrust(memberId, res) {
-  const memberRow = await db.query(
-    `SELECT telegram_linked_at FROM Members WHERE id = $1 AND deleted_at IS NULL`,
-    [memberId]
-  );
-  const linkedAt = memberRow.rows[0]?.telegram_linked_at;
-  if (!linkedAt) return null;
-
   const token = generateDeviceToken();
   const tokenHash = hashValue(token);
 
   await db.query(`DELETE FROM StationCheckInDevices WHERE member_id = $1`, [memberId]);
-  await db.query(
+  // Copy the link time in SQL. A JavaScript Date drops microseconds, and that
+  // made the member look newly linked, so the next scan asked for a code again.
+  const inserted = await db.query(
     `
     INSERT INTO StationCheckInDevices (member_id, token_hash, telegram_linked_at)
-    VALUES ($1, $2, $3)
+    SELECT $1, $2, telegram_linked_at
+    FROM Members
+    WHERE id = $1 AND deleted_at IS NULL AND telegram_linked_at IS NOT NULL
+    RETURNING id
     `,
-    [memberId, tokenHash, linkedAt]
+    [memberId, tokenHash]
   );
+  if (!inserted.rows[0]) return null;
 
   setDeviceCookie(res, token);
   return token;
