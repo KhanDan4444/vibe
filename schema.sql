@@ -367,6 +367,13 @@ CREATE INDEX IF NOT EXISTS idx_checkins_member_at
 CREATE INDEX IF NOT EXISTS idx_checkins_gym_at
   ON CheckIns (gym_id, checked_in_at DESC);
 
+CREATE TABLE IF NOT EXISTS NotificationInbox (
+  user_id INTEGER PRIMARY KEY REFERENCES Users(id) ON DELETE CASCADE,
+  read_ids JSONB NOT NULL DEFAULT '[]'::jsonb,
+  dismissed_ids JSONB NOT NULL DEFAULT '[]'::jsonb,
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
 ALTER TABLE Gyms
   ADD COLUMN IF NOT EXISTS visits_per_week SMALLINT
     CHECK (visits_per_week IS NULL OR (visits_per_week >= 1 AND visits_per_week <= 7)),

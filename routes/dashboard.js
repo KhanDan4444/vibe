@@ -25,6 +25,9 @@ const { fetchBranchComparisonMetrics } = require('../utils/branchComparison');
 const { isGymOwner } = require('../utils/roles');
 const { isTrialSubscription, trialDaysLeft } = require('../utils/gymTrial');
 const { calendarDateString, todayLocalString, checkInOnCalendarDaySql } = require('../utils/localDate');
+const { loadNotificationInbox, mergeNotificationInbox } = require('../utils/notificationInbox');
+const { validateBody } = require('../middleware/validate');
+const { notificationInboxIdsSchema } = require('../validation/schemas');
 
 router.use(auth, checkSubscription, requireGymAccess);
 
@@ -352,6 +355,7 @@ router.get('/', async (req, res, next) => {
     const licenseEndDate = subRow ? calendarDateString(subRow.end_date) : null;
     const trialDaysLeftValue =
       isTrial && licenseEndDate ? trialDaysLeft(licenseEndDate) : null;
+    const inbox = await loadNotificationInbox(req.user.id);
 
     res.json({
       totalMembers: totalMembersRes.rows[0].count,
@@ -374,6 +378,8 @@ router.get('/', async (req, res, next) => {
         amount: parseFloat(r.amount),
       })),
       notifications,
+      notificationReadIds: inbox.readIds,
+      notificationDismissedIds: inbox.dismissedIds,
       branchId: scope.branchId,
       subscriptionStatus: req.gymSubscriptionStatus,
       readOnly: req.gymSubscriptionStatus === 'suspended',
@@ -386,6 +392,32 @@ router.get('/', async (req, res, next) => {
             ? 0
             : undefined,
     });
+  } catch (error) {
+    next(error);
+  }
+});
+
+router.get('/notifications/inbox', async (req, res, next) => {
+  try {
+    res.json(await loadNotificationInbox(req.user.id));
+  } catch (error) {
+    next(error);
+  }
+});
+
+router.post('/notifications/read', validateBody(notificationInboxIdsSchema), async (req, res, next) => {
+  try {
+    const saved = await mergeNotificationInbox(req.user.id, { readIds: req.body.ids });
+    res.json({ readIds: saved.readIds, dismissedIds: saved.dismissedIds });
+  } catch (error) {
+    next(error);
+  }
+});
+
+router.post('/notifications/dismiss', validateBody(notificationInboxIdsSchema), async (req, res, next) => {
+  try {
+    const saved = await mergeNotificationInbox(req.user.id, { dismissedIds: req.body.ids });
+    res.json({ readIds: saved.readIds, dismissedIds: saved.dismissedIds });
   } catch (error) {
     next(error);
   }

@@ -449,6 +449,10 @@ const updateBranchSchema = z
     message: 'At least one field is required.',
   });
 
+const notificationInboxIdsSchema = z.object({
+  ids: z.array(z.string().trim().regex(/^[a-z]{2,12}-\d{1,12}$/)).max(500),
+});
+
 module.exports = {
   idParamSchema,
   loginSchema,
@@ -487,4 +491,5 @@ module.exports = {
   createBranchSchema,
   updateBranchSchema,
   reassignBranchStaffSchema,
+  notificationInboxIdsSchema,
 };
